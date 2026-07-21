@@ -1,0 +1,15 @@
+{
+  "card_lot": "lab-blank-multi-vendor-ok",
+  "notes": "Carte sans application. Capture terrain validation v0. Pas de clés.",
+  "uid": "04350B92EB5A80",
+  "free_memory_bytes": 8192,
+  "application_ids": [],
+  "exchanges": [
+    { "tx": "9060000000", "rx": "04010112001A0591AF", "name": "GetVersion" },
+    { "tx": "90AF000000", "rx": "04010102011A0591AF", "name": "AdditionalFrame" },
+    { "tx": "90AF000000", "rx": "04350B92EB5A80CE6A164D8240179100", "name": "AdditionalFrame" },
+    { "tx": "905A00000300000000", "rx": "9100", "name": "SelectApplication PICC" },
+    { "tx": "906E000000", "rx": "0020009100", "name": "GetFreeMemory" },
+    { "tx": "906A000000", "rx": "9100", "name": "GetApplicationIDs empty" }
+  ]
+}

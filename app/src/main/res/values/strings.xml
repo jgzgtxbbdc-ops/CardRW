@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CardRW</string>
+
+    <!-- Accueil -->
+    <string name="home_title">CardRW</string>
+    <string name="home_subtitle">Encoder, lire et comprendre les cartes DESFire EV3</string>
+    <string name="nav_card">Carte</string>
+    <string name="nav_card_desc">Lire / encoder une carte (wizard + explorateur)</string>
+    <string name="nav_templates">Templates</string>
+    <string name="nav_templates_desc">Créer, éditer, lancer une série (v1.1)</string>
+    <string name="nav_dumps">Dumps</string>
+    <string name="nav_dumps_desc">Importer, exporter, restaurer</string>
+    <string name="nav_journal">Journal APDU</string>
+    <string name="nav_journal_desc">Historique des trames de la session</string>
+
+    <!-- Carte -->
+    <string name="card_title">Carte</string>
+    <string name="card_waiting">Approche une carte DESFire de l’antenne NFC…</string>
+    <string name="card_place_hint">Zone idéale : centre arrière du téléphone</string>
+    <string name="card_nfc_disabled">NFC désactivé — active-le dans les réglages système.</string>
+    <string name="card_nfc_unavailable">Cet appareil n’a pas de NFC.</string>
+    <string name="card_reading">Lecture en cours…</string>
+    <string name="card_identity_title">Profil détecté</string>
+    <string name="card_uid">UID</string>
+    <string name="card_uid_random">Random ID</string>
+    <string name="card_uid_real">UID réel</string>
+    <string name="card_type">Type</string>
+    <string name="card_memory">Mémoire</string>
+    <string name="card_apps">Applications (%1$d)</string>
+    <string name="card_apps_hint">Tap = SelectApplication (carte sur l’antenne).</string>
+    <string name="card_no_apps">Aucune application (carte vide)</string>
+    <string name="card_error">Erreur de lecture</string>
+    <string name="card_raw_fields">Détail technique GetVersion</string>
+    <string name="card_raw_fields_show">Afficher le détail technique</string>
+    <string name="card_raw_fields_hide">Masquer le détail technique</string>
+    <string name="card_sw_version">Logiciel</string>
+    <string name="card_production">Date de production</string>
+    <string name="card_notes">Notes</string>
+    <string name="card_app_selected_badge">Sélectionnée</string>
+    <string name="card_selected_app">Marquée : %1$s</string>
+    <string name="card_action_explore">Explorer (lecture)</string>
+    <string name="card_explore_hint_picc">PICC : key settings uniquement (pas de fichiers ici)</string>
+    <string name="card_explore_hint_app">Key settings · fichiers · ReadData Standard</string>
+    <string name="card_reread">Relire une carte</string>
+    <string name="card_tag_lost">Carte perdue — ne pas retirer pendant une opération.</string>
+    <string name="card_keep_on_antenna">Garde la carte posée pour auth et exploration.</string>
+    <string name="card_profile_type_sw">%1$s · SW %2$s</string>
+
+    <!-- Session auth -->
+    <string name="card_session_label">Session</string>
+    <string name="card_session_none">Sans authentification</string>
+    <string name="card_session_selected_app">App %1$s sélectionnée</string>
+    <string name="card_session_sm">%1$s</string>
+    <string name="card_session_detail">App %1$s · clé %2$d</string>
+    <string name="card_auth_title">Authentification AES</string>
+    <string name="card_auth_hint">AuthenticateAES → session SM EV1. Labo : clé usine 00…00.</string>
+    <string name="card_key_no">Clé n°</string>
+    <string name="card_key_hex">Clé AES-128 (32 hex)</string>
+    <string name="card_key_hex_support">%1$d / 32 · ex. groupée : %2$s</string>
+    <string name="card_key_factory">Usine 00…00</string>
+    <string name="card_key_paste">Coller</string>
+    <string name="card_auth_action">Authentifier</string>
+    <string name="card_auth_again">Ré-authentifier</string>
+    <string name="card_get_card_uid">Lire UID réel (GetCardUID)</string>
+
+    <!-- Explorateur -->
+    <string name="card_explorer_title">Explorateur · %1$s</string>
+    <string name="card_key_settings">Key settings</string>
+    <string name="card_key_settings_detail">raw=0x%1$s · maxKeys≈%2$d</string>
+    <string name="card_key_settings_freelist_off">Free-list OFF → structure (IDs/settings) = clé maître 0 uniquement. Lecture = clé du droit R.</string>
+    <string name="card_explore_from_cache">Structure en cache — lecture avec la clé de session actuelle.</string>
+    <string name="card_picc_label">PICC (master carte)</string>
+    <string name="card_explore_hint_twophase">Astuce : clé 0 = structure · clé R = données (si free-list off)</string>
+    <string name="card_no_files">Aucun fichier listé</string>
+    <string name="card_file_data">Données (hex)</string>
+    <string name="card_file_no_data">Pas de données lues</string>
+
+    <!-- Journal -->
+    <string name="journal_title">Journal APDU</string>
+    <string name="journal_empty">Aucune trame pour l’instant. Approche une carte depuis l’écran Carte.</string>
+    <string name="journal_level_summary">Résumé</string>
+    <string name="journal_level_detailed">Détaillé</string>
+    <string name="journal_level_hex">Hex</string>
+    <string name="journal_clear">Effacer</string>
+    <string name="journal_export">Exporter (support)</string>
+
+    <!-- Templates / Dumps placeholders -->
+    <string name="templates_title">Templates</string>
+    <string name="templates_placeholder">Les templates et l’encodage en série arrivent en v1.1.</string>
+    <string name="dumps_title">Dumps</string>
+    <string name="dumps_placeholder">Dumps JSON structurés en v1 · restauration en v1.2.</string>
+
+    <!-- Disclaimer -->
+    <string name="disclaimer_title">Usage légitime</string>
+    <string name="disclaimer_body">CardRW est destiné à l’encodage et au diagnostic de cartes dont vous gérez les clés (atelier, labo, politique d’entreprise). Vous êtes responsable des secrets exportés et des opérations irréversibles (gel de key settings, formatage).</string>
+    <string name="disclaimer_accept">J’ai compris</string>
+
+    <!-- Densité UI -->
+    <string name="density_beginner">Débutant</string>
+    <string name="density_expert">Expert</string>
+
+    <!-- Commun -->
+    <string name="back">Retour</string>
+    <string name="coming_soon">Bientôt</string>
+    <string name="version_label">v%1$s</string>
+</resources>

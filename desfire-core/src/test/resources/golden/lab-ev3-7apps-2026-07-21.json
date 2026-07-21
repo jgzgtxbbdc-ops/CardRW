@@ -1,0 +1,26 @@
+{
+  "card_lot": "lab-field-2026-07-21",
+  "notes": "Capture réelle Journal APDU — 7 applications, free mem 0x39E0, SW 3.1 → EV3",
+  "uid_from_getversion": "04A27F524C1C90",
+  "version_concat_hex": "04010233001C0504010303011C0504A27F524C1C9020979730300724",
+  "free_memory_le_hex": "E03900",
+  "free_memory_bytes": 14816,
+  "application_ids_hex": "C023F5C123F5C223F5C323F5C423F5C523F5C623F5",
+  "application_ids": [
+    "C023F5",
+    "C123F5",
+    "C223F5",
+    "C323F5",
+    "C423F5",
+    "C523F5",
+    "C623F5"
+  ],
+  "exchanges": [
+    { "tx": "9060000000", "rx": "04010233001C0591AF" },
+    { "tx": "90AF000000", "rx": "04010303011C0591AF" },
+    { "tx": "90AF000000", "rx": "04A27F524C1C90209797303007249100" },
+    { "tx": "905A00000300000000", "rx": "9100" },
+    { "tx": "906E000000", "rx": "E039009100" },
+    { "tx": "906A000000", "rx": "C023F5C123F5C223F5C323F5C423F5C523F5C623F59100" }
+  ]
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Secrets must never leave the device via auto-backup (CDC §6.2). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" path="secrets/" />
+        <exclude domain="sharedpref" path="secrets.xml" />
+        <exclude domain="database" path="secrets.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" path="secrets/" />
+    </device-transfer>
+</data-extraction-rules>

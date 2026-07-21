@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple card glyph for launcher placeholder -->
+    <path
+        android:fillColor="#E8F4FC"
+        android:pathData="M28,36h52c2.2,0 4,1.8 4,4v28c0,2.2 -1.8,4 -4,4H28c-2.2,0 -4,-1.8 -4,-4V40c0,-2.2 1.8,-4 4,-4z" />
+    <path
+        android:fillColor="#0B3D5C"
+        android:pathData="M34,48h40v4H34zM34,56h28v4H34z" />
+    <path
+        android:fillColor="#3D9BE9"
+        android:pathData="M54,22c-8,0 -14,6 -14,14h4c0,-5.5 4.5,-10 10,-10s10,4.5 10,10h4c0,-8 -6,-14 -14,-14z" />
+</vector>

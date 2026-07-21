@@ -1,0 +1,245 @@
+package com.cardrw.desfire.model
+
+/**
+ * Mode de communication d’un fichier DESFire (2 bits bas de FileSettings).
+ * CDC §3.2 / §5.2.
+ */
+enum class CommMode(val wire: Int, val labelFr: String) {
+    PLAIN(0x00, "Plain"),
+    MACED(0x01, "MACed"),
+    FULL(0x03, "Fully enciphered"),
+    ;
+
+    companion object {
+        fun fromWire(raw: Int): CommMode {
+            // Seuls les 2 bits bas comptent pour le mode ; bit 1 parfois set → full
+            return when (raw and 0x03) {
+                0x00 -> PLAIN
+                0x01 -> MACED
+                0x03 -> FULL
+                0x02 -> FULL // rarement utilisé ; traiter comme full
+                else -> PLAIN
+            }
+        }
+    }
+}
+
+enum class FileType(val code: Int, val labelFr: String) {
+    STANDARD(0x00, "Standard Data"),
+    BACKUP(0x01, "Backup Data"),
+    VALUE(0x02, "Value"),
+    LINEAR_RECORDS(0x03, "Linear Records"),
+    CYCLIC_RECORDS(0x04, "Cyclic Records"),
+    UNKNOWN(-1, "Inconnu"),
+    ;
+
+    companion object {
+        fun fromCode(code: Int): FileType =
+            entries.firstOrNull { it.code == (code and 0xFF) } ?: UNKNOWN
+    }
+}
+
+/**
+ * Droits d’accès fichier — n° de clé 0–13, Free (0xE / 14), Never (0xF / 15).
+ */
+data class AccessRights(
+    val read: Int,
+    val write: Int,
+    val readWrite: Int,
+    val change: Int,
+    val raw: Int,
+) {
+    fun describe(key: Int): String = when (key and 0x0F) {
+        0x0E -> "Free"
+        0x0F -> "Never"
+        else -> "Clé ${key and 0x0F}"
+    }
+
+    val readLabel: String get() = describe(read)
+    val writeLabel: String get() = describe(write)
+    val readWriteLabel: String get() = describe(readWrite)
+    val changeLabel: String get() = describe(change)
+
+    val isReadFree: Boolean get() = (read and 0x0F) == 0x0E
+    val isReadNever: Boolean get() = (read and 0x0F) == 0x0F
+
+    /**
+     * True si [authKeyNo] peut lire : Free, ou clé = Read, ou clé = ReadWrite.
+     * (La clé maître app n’a **pas** de passe-droit implicite sur les fichiers.)
+     */
+    fun canReadWith(authKeyNo: Int?): Boolean {
+        val r = read and 0x0F
+        val rw = readWrite and 0x0F
+        if (r == 0x0E) return true // Free
+        if (r == 0x0F && rw == 0x0F) return false // Never both
+        if (authKeyNo == null) return false
+        val k = authKeyNo and 0x0F
+        return k == r || k == rw
+    }
+
+    companion object {
+        /** Deux octets big-endian : RRRRWWWW RRRRCCCC (NXP / freefare MDAR_*). */
+        fun parse(rawBe: Int): AccessRights {
+            val ar = rawBe and 0xFFFF
+            return AccessRights(
+                read = (ar ushr 12) and 0x0F,
+                write = (ar ushr 8) and 0x0F,
+                readWrite = (ar ushr 4) and 0x0F,
+                change = ar and 0x0F,
+                raw = ar,
+            )
+        }
+
+        fun parse(bytes: ByteArray, offset: Int = 0): AccessRights {
+            require(bytes.size >= offset + 2)
+            val raw = ((bytes[offset].toInt() and 0xFF) shl 8) or (bytes[offset + 1].toInt() and 0xFF)
+            return parse(raw)
+        }
+    }
+}
+
+/**
+ * Réponse GetFileSettings — v0.5 : Standard Data prioritaire.
+ */
+data class FileSettings(
+    val fileNo: Int,
+    val fileType: FileType,
+    val commMode: CommMode,
+    val accessRights: AccessRights,
+    val sizeBytes: Int?,
+    val raw: ByteArray,
+) {
+    val isStandard: Boolean get() = fileType == FileType.STANDARD
+    val summaryLabel: String
+        get() = buildString {
+            append("Fichier $fileNo · ${fileType.labelFr}")
+            if (sizeBytes != null) append(" · $sizeBytes o")
+            append(" · ${commMode.labelFr}")
+        }
+
+    companion object {
+        fun parse(fileNo: Int, data: ByteArray): FileSettings {
+            require(data.isNotEmpty()) { "GetFileSettings data vide" }
+            val type = FileType.fromCode(data[0].toInt())
+            val comm = if (data.size >= 2) CommMode.fromWire(data[1].toInt()) else CommMode.PLAIN
+            val rights = if (data.size >= 4) AccessRights.parse(data, 2) else AccessRights.parse(0xEEEE)
+            val size = when (type) {
+                FileType.STANDARD, FileType.BACKUP -> {
+                    if (data.size >= 7) {
+                        (data[4].toInt() and 0xFF) or
+                            ((data[5].toInt() and 0xFF) shl 8) or
+                            ((data[6].toInt() and 0xFF) shl 16)
+                    } else null
+                }
+                else -> null
+            }
+            return FileSettings(
+                fileNo = fileNo,
+                fileType = type,
+                commMode = comm,
+                accessRights = rights,
+                sizeBytes = size,
+                raw = data.copyOf(),
+            )
+        }
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is FileSettings) return false
+        return fileNo == other.fileNo &&
+            fileType == other.fileType &&
+            commMode == other.commMode &&
+            accessRights == other.accessRights &&
+            sizeBytes == other.sizeBytes &&
+            raw.contentEquals(other.raw)
+    }
+
+    override fun hashCode(): Int {
+        var r = fileNo
+        r = 31 * r + fileType.hashCode()
+        r = 31 * r + commMode.hashCode()
+        r = 31 * r + accessRights.hashCode()
+        r = 31 * r + (sizeBytes ?: 0)
+        r = 31 * r + raw.contentHashCode()
+        return r
+    }
+}
+
+/**
+ * GetKeySettings — PICC ou application.
+ * Byte0 = settings bits ; byte1 = max keys (nibble bas) + type crypto (nibble haut, AES=0x8x souvent).
+ */
+data class KeySettingsInfo(
+    val settingsRaw: Int,
+    val maxKeys: Int,
+    val raw: ByteArray,
+) {
+    val bits: KeySettingsBits get() = KeySettingsBits.from(settingsRaw)
+
+    companion object {
+        fun parse(data: ByteArray): KeySettingsInfo {
+            require(data.size >= 2) { "GetKeySettings attend ≥ 2 octets, got ${data.size}" }
+            val settings = data[0].toInt() and 0xFF
+            val maxKeys = data[1].toInt() and 0x0F
+            return KeySettingsInfo(settings, maxKeys, data.copyOf())
+        }
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is KeySettingsInfo) return false
+        return settingsRaw == other.settingsRaw && maxKeys == other.maxKeys && raw.contentEquals(other.raw)
+    }
+
+    override fun hashCode(): Int {
+        var r = settingsRaw
+        r = 31 * r + maxKeys
+        r = 31 * r + raw.contentHashCode()
+        return r
+    }
+}
+
+/** Bits key settings (lecture) — CDC §3.2 / §7. */
+data class KeySettingsBits(
+    val allowMasterKeyChange: Boolean,
+    val freeDirectoryListWithoutMaster: Boolean,
+    val freeCreateDeleteWithoutMaster: Boolean,
+    val configurationChangeable: Boolean,
+    /** Bits 4–7 : change key access (0xE = auth with key to change, 0xF = same key only, etc.). */
+    val changeKeyAccessBits: Int,
+) {
+    companion object {
+        fun from(raw: Int): KeySettingsBits {
+            val v = raw and 0xFF
+            return KeySettingsBits(
+                allowMasterKeyChange = v and 0x01 != 0,
+                freeDirectoryListWithoutMaster = v and 0x02 != 0,
+                freeCreateDeleteWithoutMaster = v and 0x04 != 0,
+                configurationChangeable = v and 0x08 != 0,
+                changeKeyAccessBits = (v ushr 4) and 0x0F,
+            )
+        }
+    }
+}
+
+/** Nœud explorateur (lecture). */
+data class FileNode(
+    val settings: FileSettings,
+    val dataHex: String? = null,
+    val dataError: String? = null,
+) {
+    val fileNo: Int get() = settings.fileNo
+}
+
+data class ApplicationExploreResult(
+    val aid: Aid,
+    val keySettings: KeySettingsInfo?,
+    val files: List<FileNode>,
+    val notes: List<String> = emptyList(),
+    /** True si les FileSettings viennent d’un explore précédent (mode lecture clé non-maître). */
+    val structureFromCache: Boolean = false,
+) {
+    val aidHex: String get() = aid.hex
+    val fileSettings: List<FileSettings> get() = files.map { it.settings }
+}
