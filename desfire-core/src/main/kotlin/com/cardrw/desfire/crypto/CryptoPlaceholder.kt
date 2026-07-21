@@ -7,8 +7,15 @@ package com.cardrw.desfire.crypto
 object AesConstants {
     const val KEY_SIZE_BYTES: Int = 16
     const val BLOCK_SIZE_BYTES: Int = 16
-    /** Clé usine labo uniquement — jamais en production. */
-    val FACTORY_KEY: ByteArray = ByteArray(KEY_SIZE_BYTES) // 00…00
+
+    /**
+     * Clé usine labo (16×`0x00`) — jamais en production.
+     *
+     * Chaque accès renvoie une **nouvelle** instance pour éviter le partage
+     * d’un [ByteArray] mutable (mutation accidentelle d’un singleton partagé).
+     */
+    val FACTORY_KEY: ByteArray
+        get() = ByteArray(KEY_SIZE_BYTES)
 }
 
 enum class SecureMessagingLevel {

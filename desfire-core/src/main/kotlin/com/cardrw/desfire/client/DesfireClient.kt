@@ -124,7 +124,8 @@ class DesfireClient(
         }
         val modeForTx = when {
             fileCommMode == null -> CommMode.PLAIN // meta : CMAC IV only
-            // ReadData / WriteData : commande toujours plain+CMAC (freefare)
+            // ReadData TX : plain+CMAC (params clairs) ; FULL ne s’applique qu’à la RX.
+            // WriteData/ChangeKey FULL : prepareCommand(..., clearHeaderLength=…) côté appelant v1.
             command == DesfireCommand.READ_DATA -> CommMode.PLAIN
             else -> fileCommMode
         }

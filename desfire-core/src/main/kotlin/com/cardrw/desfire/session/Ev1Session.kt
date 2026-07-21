@@ -34,18 +34,43 @@ class Ev1Session private constructor(
 
     /**
      * Prépare le payload commande (sans le framing 90…00).
-     * [cmdAndData] = opcode + data claire.
-     * @return bytes à placer dans le champ data de l’APDU wrappée (peut inclure MAC/chiffre).
-     *         Pour plain/CMAC-only, renvoie data seule (opcode reste dans wrap).
      *
      * Convention alignée freefare :
      * - buffer crypto commence par l’opcode pour CRC/CMAC ;
-     * - le framing wrap envoie seulement `payload` (sans re-dupliquer l’opcode dans data
-     *   sauf pour AF chaining).
+     * - le framing wrap envoie seulement le data field (opcode dans `90 CMD …`).
      *
-     * Ici [prepareCommand] prend l’opcode séparé et renvoie le **data field** APDU.
+     * ### Modes
+     * - **PLAIN** : MAJ IV via CMAC(cmd‖data), renvoie [data] telle quelle (pas de MAC append).
+     * - **MACED** : append CMAC 8 o sur cmd‖data.
+     * - **FULL**  : CRC32(cmd‖data) puis AES-CBC sur le **suffixe** chiffrable uniquement
+     *   (`data[clearHeaderLength..]` ‖ CRC ‖ pad). L’en-tête clair reste en tête du data field.
+     *
+     * ### En-têtes clairs (Write / ChangeKey v1)
+     * Sur FULL, une partie des paramètres voyage en clair (carte a besoin de les lire
+     * pour router / connaître la longueur) :
+     * - **WriteData** `0x3D` : FileNo‖Offset‖Length → [clearHeaderLength] = 7
+     * - **ChangeKey** `0xC4` : KeyNo → [clearHeaderLength] = 1
+     *
+     * CRC et CMAC couvrent toujours `cmd ‖ data` **entier** (en-tête + corps).
+     *
+     * ### ReadData FULL v0.5
+     * Le TX ReadData reste en [CommMode.PLAIN] (paramètres FileNo/Offset/Length en clair
+     * + CMAC IV). Le mode FULL s’applique à la **réponse** via [postprocessResponse].
+     * Ne pas appeler [prepareCommand] en FULL pour ReadData.
+     *
+     * @param opcode code commande DESFire
+     * @param data données claires complètes (en-tête + corps métier)
+     * @param mode mode de communication
+     * @param clearHeaderLength octets en tête de [data] laissés en clair dans le data field
+     *        APDU en mode FULL (0 = chiffre tout le data). Ignoré en PLAIN / MACED.
+     * @return data field APDU (MAC / ciphertext éventuels) — **sans** l’opcode
      */
-    fun prepareCommand(opcode: Int, data: ByteArray, mode: CommMode): ByteArray {
+    fun prepareCommand(
+        opcode: Int,
+        data: ByteArray,
+        mode: CommMode,
+        clearHeaderLength: Int = 0,
+    ): ByteArray {
         val cmdByte = (opcode and 0xFF).toByte()
         return when (mode) {
             CommMode.PLAIN -> {
@@ -60,13 +85,17 @@ class Ev1Session private constructor(
                 data + macFull.copyOf(CMAC_TX_LEN)
             }
             CommMode.FULL -> {
-                // CRC32(cmd||data) + pad + encrypt data||crc||pad (pas l’opcode)
-                val plain = byteArrayOf(cmdByte) + data
-                val crc = DesfireCrc32.computeBytes(plain)
-                val toEnc = data + crc
+                require(clearHeaderLength in 0..data.size) {
+                    "clearHeaderLength=$clearHeaderLength hors [0, ${data.size}]"
+                }
+                val header = data.copyOfRange(0, clearHeaderLength)
+                val body = data.copyOfRange(clearHeaderLength, data.size)
+                // CRC32(cmd‖header‖body) — en-tête inclus même s’il reste clair à l’émission
+                val crc = DesfireCrc32.computeBytes(byteArrayOf(cmdByte) + data)
+                val toEnc = body + crc
                 val padded = padZeros(toEnc)
                 AesCbc.cbcSend(sessionKey, iv, padded)
-                padded
+                if (header.isEmpty()) padded else header + padded
             }
         }
     }
