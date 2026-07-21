@@ -15,11 +15,49 @@
 | **v0** lecture identité + apps + journal APDU | ✅ validé terrain (multi-cartes / fabricants) |
 | **v0.5** Select AID, AuthenticateAES, SM EV1, explorateur, ReadData (y compris FULL) | ✅ validé terrain |
 | **Git** init + push GitHub privé | ✅ |
-| **FACTORY_KEY** copie défensive | ✅ (dans `51a6d52`) |
-| **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ (dans `51a6d52`) |
+| **FACTORY_KEY** copie défensive | ✅ `51a6d52` — voir contrat ci-dessous |
+| **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
+| Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
 | Passe UX (UI peu pratique) | ⬜ pas commencée |
 | Décision EV2 avant écritures massives | ⬜ à trancher (parc cartes) |
 | **v1** Write / Create / ChangeKey / dumps | ⬜ suivant majeur |
+
+### Contrat crypto déjà livré (ne pas refaire)
+
+**1) `FACTORY_KEY`**
+
+```kotlin
+val FACTORY_KEY: ByteArray
+    get() = ByteArray(KEY_SIZE_BYTES) // 16×0x00, instance neuve à chaque accès
+```
+
+Plus de singleton mutable partagé.
+
+**2) `prepareCommand` — en-têtes clairs pour v1**
+
+```kotlin
+fun prepareCommand(
+    opcode: Int,
+    data: ByteArray,
+    mode: CommMode,
+    clearHeaderLength: Int = 0,  // défaut 0 = rétro-compatible
+): ByteArray
+```
+
+| Mode | Comportement |
+|---|---|
+| PLAIN | Inchangé — ReadData TX (params clairs + CMAC IV) |
+| MACED | Inchangé — data + CMAC 8 o |
+| FULL | CRC sur `cmd‖data` entier ; chiffre seulement `data[clearHeaderLength..]` ; en-tête clair en tête du data field |
+
+Conventions v1 (à utiliser dès Write/ChangeKey) :
+
+- **WriteData `0x3D`** → `clearHeaderLength = 7` (FileNo ‖ Offset ‖ Length)
+- **ChangeKey `0xC4`** → `clearHeaderLength = 1` (KeyNo)
+
+**ReadData FULL v0.5 inchangé :** TX reste `CommMode.PLAIN` ; FULL uniquement en RX via `postprocessResponse`.
+
+Tests : `FactoryKeyTest`, `Ev1SessionPrepareCommandTest`.
 
 **Promesse produit actuelle :** lecteur DESFire pédagogique + auth + lecture fichiers protégés.  
 **Pas encore :** écriture, templates, série, formatage, SM EV2, open source.
@@ -63,13 +101,15 @@ CDC : docs/cahier-des-charges-desfire-ev3.md
 NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
-  FACTORY_KEY + prepareCommand (headers clairs) dans 51a6d52
-Hors scope immédiat : refaire v0, relire tout le CDC
+  FACTORY_KEY (copie défensive) + prepareCommand(clearHeaderLength) dans 51a6d52
+  Tests FactoryKeyTest + Ev1SessionPrepareCommandTest verts
+  ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
+Hors scope immédiat : refaire v0, refaire FACTORY_KEY/prepareCommand, relire tout le CDC
 
 Prochaine tâche (choisir une) :
   A) Passe UX courte sur flux Carte/Auth/Explore (douleurs utilisateur)
   B) Arbitrage CDC : SM EV2 avant Write ou Write EV1 d’abord (selon parc)
-  C) v1 WriteData Standard + tests + terrain
+  C) v1 WriteData Standard (clearHeaderLength=7) + tests + terrain
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 

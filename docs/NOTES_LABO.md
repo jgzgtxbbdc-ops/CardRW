@@ -99,5 +99,11 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] v0.5 code (auth + SM EV1 + explorateur)
 - [x] GetCardUID terrain
 - [x] v0.5 **ReadData Standard FULL** (clés 1 / 2, mode cache)
+- [x] Git + remote privé `jgzgtxbbdc-ops/CardRW`
+- [x] `FACTORY_KEY` copie défensive + `prepareCommand(clearHeaderLength)` (`51a6d52`)
 - [ ] Enrichir golden avec capture auth + ReadData FULL
-- [ ] v1 : write / create / ChangeKey / SM EV2
+- [ ] Passe UX flux lecture/auth
+- [ ] Arbitrage EV2 avant writes
+- [ ] v1 : write / create / ChangeKey / dumps (WriteData header=7, ChangeKey header=1)
+
+Voir aussi `docs/REPRISE.md` pour la reprise multi-machine.
