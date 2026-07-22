@@ -31,6 +31,23 @@
     <string name="card_memory">Mémoire</string>
     <string name="card_apps">Applications (%1$d)</string>
     <string name="card_apps_hint">Tap = select + lecture auto · Double-tap = auth clé par défaut (n°0 usine), sinon sheet auth.</string>
+    <!-- U4 arbre moniteur -->
+    <string name="card_tree_title">Arbre carte (PICC → apps → fichiers)</string>
+    <string name="card_tree_hint">Tap = select + lecture auto · Double-tap = auth clé par défaut (n°0 usine). Une seule app détaillée à la fois.</string>
+    <string name="card_tree_legend">Trait plein = lisible / déjà lu · pointillé = lacune (droits, free-list, non exploré).</string>
+    <string name="card_tree_apps_header">Applications (%1$d)</string>
+    <string name="card_tree_files_header">Fichiers (%1$d)</string>
+    <string name="card_tree_picc_meta">Key settings PICC</string>
+    <string name="card_tree_app_meta">Key settings application</string>
+    <string name="card_tree_picc_pending">Key settings PICC non encore lus — select ou Actualiser.</string>
+    <string name="card_tree_app_pending">Directory non encore lu — select en cours ou Actualiser.</string>
+    <string name="card_tree_app_cache_empty">Directory vide (cache)</string>
+    <string name="card_tree_app_cache_files">%1$d fichier(s) · %2$d lu(s)</string>
+    <string name="card_tree_cached_badge">Cache</string>
+    <string name="card_tree_collapsed_hint">%1$d fichier(s) en cache · %2$d lu(s) — select pour déplier</string>
+    <string name="card_tree_file_incomplete">Contenu non lu (auth requise)</string>
+    <string name="card_session_selected_picc">PICC sélectionné</string>
+    <string name="card_session_detail_picc">PICC · clé %1$d</string>
     <string name="card_default_auth_ok">Authentification réussie avec la clé par défaut</string>
     <string name="card_auth_ok">Authentification réussie</string>
     <string name="card_no_apps">Aucune application (carte vide)</string>

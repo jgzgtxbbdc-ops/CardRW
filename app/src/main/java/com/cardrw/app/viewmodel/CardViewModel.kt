@@ -48,6 +48,11 @@ data class CardUiState(
     /** Hex compact 32 chars (sans espaces) — l’UI peut grouper à l’affichage. */
     val keyHex: String = Hex.encode(AesConstants.FACTORY_KEY),
     val explore: ApplicationExploreResult? = null,
+    /**
+     * Cache multi-AID pour l’arbre moniteur (U4) : clés = AID hex uppercase.
+     * Les apps déjà visitées restent visibles repliées avec leur dernier directory.
+     */
+    val exploreByAid: Map<String, ApplicationExploreResult> = emptyMap(),
     /** UID réel via GetCardUID (après auth), si Random ID. */
     val realUidHex: String? = null,
     val busy: Boolean = false,
@@ -232,10 +237,12 @@ class CardViewModel @Inject constructor(
      */
     fun selectApplication(aidHex: String, tryDefaultAuth: Boolean = false) {
         viewModelScope.launch {
+            val cacheKey = aidHex.uppercase()
             _ui.update {
                 it.copy(
                     selectedAidHex = aidHex,
-                    explore = null,
+                    // U4 : garder le cache de l’AID si déjà visité (pas de flash vide)
+                    explore = it.exploreByAid[cacheKey],
                     authSession = null,
                     errorMessage = null,
                     busy = true,
@@ -495,9 +502,11 @@ class CardViewModel @Inject constructor(
                     else -> "Exploration : $fileCount fichier(s) · $readable lu(s)"
                 }
                 _ui.update {
+                    val key = aidHex.uppercase()
                     it.copy(
                         busy = false,
                         explore = exploreResult,
+                        exploreByAid = it.exploreByAid + (key to exploreResult),
                         authSession = session,
                         statusLine = summary,
                         errorMessage = null,
@@ -559,6 +568,7 @@ class CardViewModel @Inject constructor(
                 selectedAidHex = null,
                 authSession = null,
                 explore = null,
+                exploreByAid = emptyMap(),
                 realUidHex = null,
                 tagPresent = true,
             )

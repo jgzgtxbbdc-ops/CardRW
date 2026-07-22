@@ -169,7 +169,7 @@ Option labo opt-in éventuelle : hors scope U1–U4.
 | **U1** | Pull auto post-select et post-auth ; bouton → « Actualiser » | ✅ 2026-07-22 — select/auth → `runExplore` ; CTA Actualiser | Faible |
 | **U2** | Auth en bottom sheet ; panneau retiré du scroll ; barre session | ✅ 2026-07-22 — ModalBottomSheet + AuthSessionBar sticky | Moyen |
 | **U3** | `keysFor(intent)` ; candidates ; Free/Never ; CTA nœud | ✅ 2026-07-22 — AuthKeyPlanner + sheet slots + CTA fichier | Moyen |
-| **U4** | Arbre PICC super-nœud ; fichiers sous apps ; style plein/pointillé | Plus de PICC « comme une app » ; fichiers imbriqués | Élevé |
+| **U4** | Arbre PICC super-nœud ; fichiers sous apps ; style plein/pointillé | ✅ 2026-07-22 — `DesfireCardTree` + cache multi-AID | Élevé |
 | **U5** | GetCardUID auto ; preview hex ; restore scroll ; légende accès | Polish terrain | Faible |
 
 **Ordre imposé :** U1 → U2 → U3 → U4 → U5.  
@@ -196,9 +196,9 @@ Option labo opt-in éventuelle : hors scope U1–U4.
 
 | Zone | Fichiers |
 |---|---|
-| État / ops | `app/.../viewmodel/CardViewModel.kt` |
-| UI Carte | `app/.../ui/screens/card/CardScreen.kt` (split probable en U4) |
-| Droits → candidates | `desfire-core/.../model/FileModels.kt` (+ helper pur testable) |
+| État / ops | `app/.../viewmodel/CardViewModel.kt` (`exploreByAid` cache multi-AID) |
+| UI Carte | `CardScreen.kt` + **`DesfireCardTree.kt`** (U4) |
+| Droits → candidates | `desfire-core/.../model/FileModels.kt` + `AuthKeyPlanner` |
 | Strings | `app/src/main/res/values/strings.xml` |
 
 Aucun changement protocole requis pour U1–U3 si `exploreSelectedApplication` / auth restent stables.

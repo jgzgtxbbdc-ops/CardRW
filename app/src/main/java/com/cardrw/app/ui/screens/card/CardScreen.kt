@@ -6,16 +6,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -68,7 +64,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -82,14 +77,11 @@ import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.viewmodel.CardPhase
 import com.cardrw.app.viewmodel.CardUiState
 import com.cardrw.app.viewmodel.CardViewModel
-import com.cardrw.desfire.model.Aid
-import com.cardrw.desfire.model.ApplicationExploreResult
 import com.cardrw.desfire.model.AuthBarrier
 import com.cardrw.desfire.model.AuthIntent
 import com.cardrw.desfire.model.AuthKeyPlan
 import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.CardIdentity
-import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.model.VersionInfo
 import com.cardrw.desfire.session.AuthSession
@@ -192,7 +184,6 @@ private fun ReadyMonitor(
     modifier: Modifier = Modifier,
 ) {
     val authenticated = ui.authSession?.authenticated == true
-    val isPicc = ui.selectedAidHex.equals("000000", ignoreCase = true)
     val vaultEntries by viewModel.vaultEntries.collectAsStateWithLifecycle()
     var showAuthSheet by rememberSaveable { mutableStateOf(false) }
     var authPlan by remember { mutableStateOf<AuthKeyPlan?>(null) }
@@ -327,55 +318,31 @@ private fun ReadyMonitor(
                 VersionTechnicalSection(version = version)
             }
 
-            ApplicationsSection(
+            // U4 — arbre PICC super-nœud → apps → fichiers (plus de liste plate)
+            DesfireCardTree(
                 applications = identity.applications,
                 selectedAidHex = ui.selectedAidHex,
+                exploreByAid = ui.exploreByAid,
+                busy = ui.busy,
+                sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber,
                 friendlyName = viewModel::friendlyName,
-                enabled = !ui.busy,
-                onSelect = { hex -> viewModel.selectApplication(hex, tryDefaultAuth = false) },
-                onSelectPicc = { viewModel.selectApplication("000000", tryDefaultAuth = false) },
-                onDoubleSelect = { hex -> viewModel.selectApplication(hex, tryDefaultAuth = true) },
+                onSelectPicc = {
+                    viewModel.selectApplication("000000", tryDefaultAuth = false)
+                },
                 onDoubleSelectPicc = {
                     viewModel.selectApplication("000000", tryDefaultAuth = true)
                 },
+                onSelectApp = { hex ->
+                    viewModel.selectApplication(hex, tryDefaultAuth = false)
+                },
+                onDoubleSelectApp = { hex ->
+                    viewModel.selectApplication(hex, tryDefaultAuth = true)
+                },
+                onRefresh = { viewModel.explore() },
+                onAuthForFile = { node ->
+                    openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
+                },
             )
-
-            if (ui.selectedAidHex != null) {
-                OutlinedButton(
-                    onClick = { viewModel.explore() },
-                    enabled = !ui.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    BusyLabel(busy = ui.busy, text = stringResource(R.string.card_action_refresh))
-                }
-                Text(
-                    text = if (isPicc) {
-                        stringResource(R.string.card_explore_hint_picc)
-                    } else {
-                        stringResource(R.string.card_explore_hint_app)
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (!isPicc) {
-                    Text(
-                        text = stringResource(R.string.card_explore_hint_twophase),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-
-            ui.explore?.let { explore ->
-                ExplorerSection(
-                    explore = explore,
-                    busy = ui.busy,
-                    sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber,
-                    onAuthForFile = { node ->
-                        openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
-                    },
-                )
-            }
 
             if (identity.rawNotes.isNotEmpty()) {
                 NotesSection(notes = identity.rawNotes)
@@ -501,12 +468,17 @@ private fun AuthSessionBar(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
+                val isPiccSession = session.aidHex.equals("000000", ignoreCase = true)
                 Text(
-                    text = stringResource(
-                        R.string.card_session_detail,
-                        prettyAid(session.aidHex),
-                        session.keyNumber,
-                    ),
+                    text = if (isPiccSession) {
+                        stringResource(R.string.card_session_detail_picc, session.keyNumber)
+                    } else {
+                        stringResource(
+                            R.string.card_session_detail,
+                            prettyAid(session.aidHex),
+                            session.keyNumber,
+                        )
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
                 )
@@ -516,8 +488,13 @@ private fun AuthSessionBar(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 if (selectedAid != null) {
+                    val isPicc = selectedAid.equals("000000", ignoreCase = true)
                     Text(
-                        text = stringResource(R.string.card_session_selected_app, prettyAid(selectedAid)),
+                        text = if (isPicc) {
+                            stringResource(R.string.card_session_selected_picc)
+                        } else {
+                            stringResource(R.string.card_session_selected_app, prettyAid(selectedAid))
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -636,8 +613,13 @@ private fun AuthSheetContent(
             fontWeight = FontWeight.SemiBold,
         )
         if (selectedAid != null) {
+            val isPicc = selectedAid.equals("000000", ignoreCase = true)
             Text(
-                text = stringResource(R.string.card_session_selected_app, prettyAid(selectedAid)),
+                text = if (isPicc) {
+                    stringResource(R.string.card_session_selected_picc)
+                } else {
+                    stringResource(R.string.card_session_selected_app, prettyAid(selectedAid))
+                },
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -878,199 +860,6 @@ private fun AuthSheetContent(
 }
 
 @Composable
-private fun ExplorerSection(
-    explore: ApplicationExploreResult,
-    busy: Boolean,
-    sessionKey: Int?,
-    onAuthForFile: (FileNode) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = stringResource(R.string.card_explorer_title, prettyAid(explore.aidHex)),
-            style = MaterialTheme.typography.titleSmall,
-        )
-        explore.keySettings?.let { ks ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.card_key_settings),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Text(
-                        text = stringResource(
-                            R.string.card_key_settings_detail,
-                            ks.settingsRaw.toString(16).uppercase().padStart(2, '0'),
-                            ks.maxKeys,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    val bits = ks.bits
-                    Text(
-                        text = buildString {
-                            append("master change: ${bits.allowMasterKeyChange} · ")
-                            append("free list: ${bits.freeDirectoryListWithoutMaster} · ")
-                            append("config: ${bits.configurationChangeable}")
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (!bits.freeDirectoryListWithoutMaster) {
-                        Text(
-                            text = stringResource(R.string.card_key_settings_freelist_off),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-            }
-        }
-        if (explore.structureFromCache) {
-            Text(
-                text = stringResource(R.string.card_explore_from_cache),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (explore.files.isEmpty()) {
-            Text(
-                text = stringResource(R.string.card_no_files),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            for (node in explore.files) {
-                FileNodeCard(
-                    node = node,
-                    busy = busy,
-                    sessionKey = sessionKey,
-                    onAuthForRead = { onAuthForFile(node) },
-                )
-            }
-        }
-        if (explore.notes.isNotEmpty()) {
-            NotesSection(notes = explore.notes)
-        }
-    }
-}
-
-@Composable
-private fun FileNodeCard(
-    node: FileNode,
-    busy: Boolean,
-    sessionKey: Int?,
-    onAuthForRead: () -> Unit,
-) {
-    var expanded by rememberSaveable(node.fileNo) { mutableStateOf(node.dataHex != null) }
-    val s = node.settings
-    val rights = s.accessRights
-    val canRead = rights.canReadWith(sessionKey)
-    val readPlan = remember(node.fileNo, rights, sessionKey) {
-        AuthKeyPlanner.plan(AuthIntent.ReadFile(node.fileNo, rights), sessionKey)
-    }
-    val needsAuthForRead = node.dataHex == null &&
-        readPlan.barrier == AuthBarrier.NEEDS_KEY
-    val neverRead = readPlan.barrier == AuthBarrier.NEVER
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { expanded = !expanded },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = s.summaryLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "R=${rights.readLabel} · W=${rights.writeLabel} · " +
-                            "RW=${rights.readWriteLabel} · Ch=${rights.changeLabel}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = null,
-                )
-            }
-            if (needsAuthForRead) {
-                val keysLabel = readPlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
-                TextButton(
-                    onClick = onAuthForRead,
-                    enabled = !busy,
-                ) {
-                    Text(
-                        stringResource(
-                            R.string.card_file_auth_to_read,
-                            keysLabel.ifEmpty { "?" },
-                        ),
-                    )
-                }
-            } else if (neverRead && node.dataHex == null) {
-                Text(
-                    text = stringResource(R.string.card_file_read_never),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            AnimatedVisibility(visible = expanded) {
-                val dataHex = node.dataHex
-                val dataError = node.dataError
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    HorizontalDivider()
-                    when {
-                        dataHex != null -> {
-                            Text(
-                                text = stringResource(R.string.card_file_data),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                            Text(
-                                text = prettyHex(dataHex),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                        }
-                        dataError != null -> {
-                            Text(
-                                text = dataError,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        canRead -> {
-                            Text(
-                                text = stringResource(R.string.card_file_no_data),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        else -> {
-                            Text(
-                                text = stringResource(R.string.card_file_no_data),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ProfileSummaryCard(
     identity: CardIdentity,
     realUidHex: String?,
@@ -1263,168 +1052,6 @@ private fun AuthSuccessFlash(visible: Boolean, message: String) {
             )
         }
     }
-}
-
-@Composable
-private fun ApplicationsSection(
-    applications: List<Aid>,
-    selectedAidHex: String?,
-    friendlyName: (String) -> String?,
-    enabled: Boolean,
-    onSelect: (String) -> Unit,
-    onSelectPicc: () -> Unit,
-    onDoubleSelect: (String) -> Unit,
-    onDoubleSelectPicc: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = stringResource(R.string.card_apps, applications.size),
-            style = MaterialTheme.typography.titleSmall,
-        )
-        Text(
-            text = stringResource(R.string.card_apps_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        ApplicationRow(
-            index = -1,
-            prettyHex = "00 00 00",
-            friendly = stringResource(R.string.card_picc_label),
-            selected = selectedAidHex.equals("000000", ignoreCase = true),
-            enabled = enabled,
-            onClick = onSelectPicc,
-            onDoubleClick = onDoubleSelectPicc,
-        )
-        if (applications.isEmpty()) {
-            Text(
-                text = stringResource(R.string.card_no_apps),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (index in applications.indices) {
-                    val aid = applications[index]
-                    val hex = aid.hex
-                    ApplicationRow(
-                        index = index,
-                        prettyHex = prettyAid(hex),
-                        friendly = friendlyName(hex),
-                        selected = hex.equals(selectedAidHex, ignoreCase = true),
-                        enabled = enabled,
-                        onClick = { onSelect(hex) },
-                        onDoubleClick = { onDoubleSelect(hex) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ApplicationRow(
-    index: Int,
-    prettyHex: String,
-    friendly: String?,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    onDoubleClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(10.dp)
-    val borderColor = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)
-    }
-    val bg = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-    }
-    val accent = MaterialTheme.colorScheme.primary
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .border(width = if (selected) 2.dp else 1.dp, color = borderColor, shape = shape)
-            .background(bg)
-            .pointerInput(enabled, prettyHex) {
-                if (!enabled) return@pointerInput
-                detectTapGestures(
-                    onDoubleTap = { onDoubleClick() },
-                    onTap = { onClick() },
-                )
-            }
-            .height(52.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .width(if (selected) 5.dp else 0.dp)
-                .background(accent),
-        )
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = if (index < 0) "P" else "#$index",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                modifier = Modifier.width(28.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = prettyHex,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                )
-                if (friendly != null) {
-                    Text(
-                        text = friendly,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (selected) {
-                Text(
-                    text = stringResource(R.string.card_app_selected_badge),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-    }
-}
-
-/** Hex espacé par octets : AABBCC → AA BB CC */
-private fun prettyAid(hex: String): String {
-    val clean = hex.replace(" ", "").uppercase()
-    return clean.chunked(2).joinToString(" ")
-}
-
-private fun prettyHex(hex: String): String {
-    val clean = hex.replace(" ", "").uppercase()
-    return clean.chunked(2).joinToString(" ")
 }
 
 /** Groupes de 4 hex pour saisie lisible (affichage seulement). */
