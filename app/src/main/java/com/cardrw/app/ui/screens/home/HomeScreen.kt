@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.automirrored.outlined.ListAlt
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.ViewModule
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -32,6 +33,7 @@ import com.cardrw.app.R
 @Composable
 fun HomeScreen(
     onOpenCard: () -> Unit,
+    onOpenVault: () -> Unit,
     onOpenTemplates: () -> Unit,
     onOpenDumps: () -> Unit,
     onOpenJournal: () -> Unit,
@@ -73,6 +75,14 @@ fun HomeScreen(
                     title = stringResource(R.string.nav_card),
                     description = stringResource(R.string.nav_card_desc),
                     onClick = onOpenCard,
+                )
+            }
+            item {
+                HomeEntry(
+                    icon = Icons.Outlined.Lock,
+                    title = stringResource(R.string.nav_vault),
+                    description = stringResource(R.string.nav_vault_desc),
+                    onClick = onOpenVault,
                 )
             }
             item {

@@ -7,6 +7,8 @@
     <string name="home_subtitle">Encoder, lire et comprendre les cartes DESFire EV3</string>
     <string name="nav_card">Carte</string>
     <string name="nav_card_desc">Lire / encoder une carte (wizard + explorateur)</string>
+    <string name="nav_vault">Coffre-fort</string>
+    <string name="nav_vault_desc">Clés AES nommées (labo) — pas de retape hex</string>
     <string name="nav_templates">Templates</string>
     <string name="nav_templates_desc">Créer, éditer, lancer une série (v1.1)</string>
     <string name="nav_dumps">Dumps</string>
@@ -65,7 +67,27 @@
     <string name="card_auth_again">Ré-authentifier</string>
     <string name="card_auth_change">Changer de clé</string>
     <string name="card_auth_cancel">Annuler</string>
+    <string name="card_auth_material">Matériau (secret)</string>
+    <string name="card_auth_from_vault">Coffre-fort</string>
+    <string name="card_auth_from_hex">Saisie hex</string>
+    <string name="card_auth_save_vault">Enregistrer dans le coffre après auth OK</string>
+    <string name="card_auth_vault_empty_hint">Coffre vide — saisis l’hex (option enregistrer) ou gère le coffre depuis l’accueil.</string>
     <string name="card_get_card_uid">Lire UID réel (GetCardUID)</string>
+
+    <!-- Coffre-fort -->
+    <string name="vault_title">Coffre-fort de clés</string>
+    <string name="vault_disclaimer">Clés de labo / test stockées sur l’appareil (chiffré Keystore). Pas un coffre entreprise. Les noms ne sont pas des slots DESFire 0–13.</string>
+    <string name="vault_empty">Aucune clé enregistrée. Ajoute-en une, ou enregistre-en depuis l’auth Carte.</string>
+    <string name="vault_add">Ajouter une clé</string>
+    <string name="vault_name">Nom</string>
+    <string name="vault_save">Enregistrer</string>
+    <string name="vault_rename">Renommer</string>
+    <string name="vault_delete">Supprimer</string>
+    <string name="vault_delete_title">Supprimer l’entrée ?</string>
+    <string name="vault_delete_message">« %1$s » sera effacée du coffre (irréversible sur cet appareil).</string>
+    <string name="vault_delete_confirm">Supprimer</string>
+    <string name="vault_entry_masked">•••••••• (AES-128)</string>
+
 
     <!-- Explorateur -->
     <string name="card_explorer_title">Explorateur · %1$s</string>

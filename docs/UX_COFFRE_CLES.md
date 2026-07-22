@@ -184,8 +184,8 @@ Disclaimer UI : coffre destiné aux clés de labo / test ; politiques d’entrep
 | ID | Contenu | Critère « done » | Dépendances |
 |----|---------|------------------|-------------|
 | **K0** | Cette spec + REPRISE + renvoi CDC | Docs mergées | — |
-| **K1** | Meta + SecretStore persistant + CRUD + écran liste minimal | Créer / renommer / supprimer / survivre au kill process | `SecretStore` réel (plus only memory pour release path) |
-| **K2** | Sheet auth : dropdown **ou** hex + ☐ enregistrer (nom keyN) | Auth labo sans retaper l’hex ; save après succès | **U2** (sheet) idéalement ; sinon panneau auth actuel en secours |
+| **K1** | Meta + SecretStore persistant + CRUD + écran liste minimal | ✅ 2026-07-22 — EncryptedPrefsSecretStore + VaultScreen | `SecretStore` réel |
+| **K2** | Sheet auth : dropdown **ou** hex + ☐ enregistrer (nom keyN) | ✅ 2026-07-22 — AuthSheet coffre/hex + save après succès | U2 |
 | **K3** | Unlock biométrique / device credential optionnel | Option OFF par défaut ; ON → prompt avant `material()` | K1 |
 | **K4** | Polish : suggestions de nom, récents par app, reveal, export | Confort | K2 |
 

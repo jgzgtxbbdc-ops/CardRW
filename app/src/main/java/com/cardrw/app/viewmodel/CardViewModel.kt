@@ -4,8 +4,10 @@ import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.data.repository.AidNameRepository
 import com.cardrw.app.data.repository.ApduJournalRepository
+import com.cardrw.app.data.repository.KeyVaultRepository
 import com.cardrw.app.nfc.IsoDepTransceiver
 import com.cardrw.desfire.client.DesfireClient
 import com.cardrw.desfire.client.DesfireProtocolException
@@ -58,17 +60,31 @@ enum class CardPhase {
 class CardViewModel @Inject constructor(
     private val journalRepository: ApduJournalRepository,
     private val aidNames: AidNameRepository,
+    private val keyVault: KeyVaultRepository,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CardUiState())
     val ui: StateFlow<CardUiState> = _ui.asStateFlow()
+
+    /** Entrées coffre (noms seulement) pour la sheet auth. */
+    val vaultEntries: StateFlow<List<KeyVaultEntryMeta>> = keyVault.entries
 
     private val nfcMutex = Mutex()
     private var liveIsoDep: IsoDep? = null
     private var liveClient: DesfireClient? = null
     private var liveUid: ByteArray? = null
 
+    init {
+        viewModelScope.launch { keyVault.load() }
+    }
+
     fun friendlyName(aidHex: String): String? = aidNames.nameFor(aidHex)
+
+    fun nextVaultDefaultName(): String = keyVault.nextDefaultName()
+
+    fun reloadVault() {
+        viewModelScope.launch { keyVault.load() }
+    }
 
     fun onTagDiscovered(tag: Tag) {
         viewModelScope.launch {
@@ -166,21 +182,18 @@ class CardViewModel @Inject constructor(
 
     /**
      * AuthenticateAES puis **re-pull auto** (structure / données selon session).
-     * @param keyNo / @param keyHex optionnels : brouillon sheet (U2) appliqué avant auth.
+     *
+     * Matériau : [keyHex] **ou** [vaultEntryId] (coffre K2).  
+     * Si [saveAsVaultName] non null et auth OK → enregistre le matériau saisi dans le coffre.
      */
-    fun authenticate(keyNo: Int? = null, keyHex: String? = null) {
+    fun authenticate(
+        keyNo: Int? = null,
+        keyHex: String? = null,
+        vaultEntryId: String? = null,
+        saveAsVaultName: String? = null,
+    ) {
         if (keyNo != null) {
             _ui.update { it.copy(keyNo = keyNo.coerceIn(0, 13)) }
-        }
-        if (keyHex != null) {
-            val clean = keyHex.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
-            if (clean.length != 32) {
-                _ui.update {
-                    it.copy(errorMessage = "Clé AES invalide : attendu 32 hex (16 octets), got ${clean.length}")
-                }
-                return
-            }
-            _ui.update { it.copy(keyHex = clean, errorMessage = null) }
         }
         val aidHex = _ui.value.selectedAidHex
         if (aidHex == null) {
@@ -188,19 +201,38 @@ class CardViewModel @Inject constructor(
             return
         }
         val resolvedKeyNo = _ui.value.keyNo
-        val keyBytes = try {
-            parseKeyHex(_ui.value.keyHex)
-        } catch (e: Exception) {
-            _ui.update { it.copy(errorMessage = "Clé AES invalide : ${e.message}") }
-            return
-        }
+
         viewModelScope.launch {
             _ui.update {
                 it.copy(busy = true, errorMessage = null, statusLine = "AuthenticateAES clé n°$resolvedKeyNo…")
             }
+            val keyBytes: ByteArray = try {
+                when {
+                    vaultEntryId != null -> {
+                        keyVault.material(vaultEntryId)
+                    }
+                    keyHex != null -> {
+                        val clean = keyHex.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
+                        if (clean.length != 32) {
+                            throw IllegalArgumentException("attendu 32 hex, got ${clean.length}")
+                        }
+                        _ui.update { it.copy(keyHex = clean) }
+                        parseKeyHex(clean)
+                    }
+                    else -> parseKeyHex(_ui.value.keyHex)
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        errorMessage = "Clé AES invalide : ${e.message}",
+                    )
+                }
+                return@launch
+            }
+
             val result = withContext(Dispatchers.IO) {
                 withLiveClient { client ->
-                    // Pas de re-Select si déjà sur cet AID (évite double 5A dans le journal)
                     client.ensureApplicationSelected(Aid.fromHex(aidHex))
                     client.authenticateAes(resolvedKeyNo, keyBytes, aidHex)
                     client.authSession
@@ -208,11 +240,27 @@ class CardViewModel @Inject constructor(
             }
             result.fold(
                 onSuccess = { session ->
+                    if (saveAsVaultName != null && vaultEntryId == null) {
+                        try {
+                            keyVault.create(saveAsVaultName, keyBytes)
+                        } catch (e: Exception) {
+                            // Auth OK ; échec save non bloquant
+                            _ui.update {
+                                it.copy(
+                                    authSession = session,
+                                    errorMessage = null,
+                                    statusLine = "Auth OK — coffre : ${e.message}",
+                                )
+                            }
+                            syncJournal()
+                            runExplore(aidHex)
+                            return@fold
+                        }
+                    }
                     _ui.update {
                         it.copy(
                             authSession = session,
                             errorMessage = null,
-                            // busy reste true : enchaîne explore
                         )
                     }
                     syncJournal()

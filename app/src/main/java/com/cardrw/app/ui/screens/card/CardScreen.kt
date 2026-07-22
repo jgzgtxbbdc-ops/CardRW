@@ -31,8 +31,13 @@ import androidx.compose.material.icons.outlined.Nfc
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cardrw.app.R
+import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.nfc.NfcReaderController
 import com.cardrw.app.viewmodel.CardPhase
 import com.cardrw.app.viewmodel.CardUiState
@@ -191,8 +198,13 @@ private fun ReadyMonitor(
 ) {
     val authenticated = ui.authSession?.authenticated == true
     val isPicc = ui.selectedAidHex.equals("000000", ignoreCase = true)
+    val vaultEntries by viewModel.vaultEntries.collectAsStateWithLifecycle()
     var showAuthSheet by rememberSaveable { mutableStateOf(false) }
     var closeSheetWhenAuthSettles by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showAuthSheet) {
+        if (showAuthSheet) viewModel.reloadVault()
+    }
 
     // Ferme la sheet après auth OK (explore auto U1 peut encore tourner : on ferme dès session OK + !busy auth phase)
     LaunchedEffect(ui.busy, ui.authSession?.authenticated, ui.errorMessage, closeSheetWhenAuthSettles) {
@@ -341,6 +353,8 @@ private fun ReadyMonitor(
             AuthSheetContent(
                 initialKeyNo = ui.keyNo,
                 initialKeyHex = ui.keyHex,
+                vaultEntries = vaultEntries,
+                defaultSaveName = viewModel.nextVaultDefaultName(),
                 busy = ui.busy,
                 authenticated = authenticated,
                 selectedAid = ui.selectedAidHex,
@@ -348,17 +362,27 @@ private fun ReadyMonitor(
                 onDismiss = {
                     if (!ui.busy) showAuthSheet = false
                 },
-                onAuthenticate = { keyNo, keyHex ->
-                    val clean = keyHex.replace(Regex("[^0-9a-fA-F]"), "")
-                    if (clean.length == 32) {
-                        closeSheetWhenAuthSettles = true
-                        viewModel.authenticate(keyNo = keyNo, keyHex = clean)
-                    }
+                onAuthenticate = { request ->
+                    closeSheetWhenAuthSettles = true
+                    viewModel.authenticate(
+                        keyNo = request.keyNo,
+                        keyHex = request.keyHex,
+                        vaultEntryId = request.vaultEntryId,
+                        saveAsVaultName = request.saveAsVaultName,
+                    )
                 },
             )
         }
     }
 }
+
+/** Paramètres d’auth depuis la sheet (hex ou coffre). */
+private data class AuthMaterialRequest(
+    val keyNo: Int,
+    val keyHex: String? = null,
+    val vaultEntryId: String? = null,
+    val saveAsVaultName: String? = null,
+)
 
 @Composable
 private fun BusyLabel(busy: Boolean, text: String) {
@@ -468,26 +492,45 @@ private fun AuthSessionBar(
 }
 
 /**
- * Formulaire auth en bottom sheet (U2).
- * Brouillon local (keyNo / keyHex) — commit vers le ViewModel à l’appui Authentifier.
+ * Formulaire auth en bottom sheet (U2 + K2).
+ * Matériau : coffre nommé **ou** hex (+ option enregistrer).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AuthSheetContent(
     initialKeyNo: Int,
     initialKeyHex: String,
+    vaultEntries: List<KeyVaultEntryMeta>,
+    defaultSaveName: String,
     busy: Boolean,
     authenticated: Boolean,
     selectedAid: String?,
     errorMessage: String?,
     onDismiss: () -> Unit,
-    onAuthenticate: (keyNo: Int, keyHex: String) -> Unit,
+    onAuthenticate: (AuthMaterialRequest) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
     var draftKeyNo by remember { mutableIntStateOf(initialKeyNo.coerceIn(0, 13)) }
     var draftKeyHex by remember {
         mutableStateOf(initialKeyHex.replace(Regex("[^0-9a-fA-F]"), "").uppercase())
     }
+    var useVault by remember { mutableStateOf(vaultEntries.isNotEmpty()) }
+    var selectedVaultId by remember {
+        mutableStateOf(vaultEntries.firstOrNull()?.id)
+    }
+    var vaultMenuExpanded by remember { mutableStateOf(false) }
+    var saveToVault by remember { mutableStateOf(false) }
+    var saveName by remember { mutableStateOf(defaultSaveName) }
     var localError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(vaultEntries) {
+        if (vaultEntries.isEmpty()) {
+            useVault = false
+            selectedVaultId = null
+        } else if (selectedVaultId == null || vaultEntries.none { it.id == selectedVaultId }) {
+            selectedVaultId = vaultEntries.first().id
+        }
+    }
 
     fun applyKeyHex(raw: String) {
         val clean = raw.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
@@ -499,6 +542,12 @@ private fun AuthSheetContent(
             else ->
                 localError = "Colle uniquement la clé AES (32 caractères hex), pas un journal APDU."
         }
+    }
+
+    val selectedVaultName = vaultEntries.find { it.id == selectedVaultId }?.displayName
+    val canSubmit = !busy && selectedAid != null && when {
+        useVault -> selectedVaultId != null
+        else -> draftKeyHex.length == 32
     }
 
     Column(
@@ -558,56 +607,157 @@ private fun AuthSheetContent(
             }
         }
 
-        OutlinedTextField(
-            value = draftKeyHex,
-            onValueChange = { applyKeyHex(it) },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_key_hex)) },
-            supportingText = {
-                Text(
-                    stringResource(
-                        R.string.card_key_hex_support,
-                        draftKeyHex.length,
-                        groupHex(draftKeyHex).ifEmpty { "—" },
-                    ),
-                )
-            },
-            singleLine = true,
-            enabled = !busy,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Characters,
-            ),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        Text(
+            text = stringResource(R.string.card_auth_material),
+            style = MaterialTheme.typography.labelMedium,
         )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(
+                selected = useVault,
+                onClick = { useVault = true },
+                enabled = !busy && vaultEntries.isNotEmpty(),
+            )
+            Text(
+                text = stringResource(R.string.card_auth_from_vault),
+                modifier = Modifier
+                    .clickable(enabled = !busy && vaultEntries.isNotEmpty()) { useVault = true }
+                    .padding(end = 12.dp),
+            )
+            RadioButton(
+                selected = !useVault,
+                onClick = { useVault = false },
+                enabled = !busy,
+            )
+            Text(
+                text = stringResource(R.string.card_auth_from_hex),
+                modifier = Modifier.clickable(enabled = !busy) { useVault = false },
+            )
+        }
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            TextButton(
-                onClick = {
-                    draftKeyHex = Hex.encode(AesConstants.FACTORY_KEY)
-                    localError = null
-                },
-                enabled = !busy,
+        if (useVault && vaultEntries.isNotEmpty()) {
+            ExposedDropdownMenuBox(
+                expanded = vaultMenuExpanded,
+                onExpandedChange = { if (!busy) vaultMenuExpanded = it },
             ) {
-                Text(stringResource(R.string.card_key_factory))
+                OutlinedTextField(
+                    value = selectedVaultName.orEmpty(),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(stringResource(R.string.vault_name)) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = vaultMenuExpanded) },
+                    modifier = Modifier
+                        .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = !busy)
+                        .fillMaxWidth(),
+                    enabled = !busy,
+                )
+                ExposedDropdownMenu(
+                    expanded = vaultMenuExpanded,
+                    onDismissRequest = { vaultMenuExpanded = false },
+                ) {
+                    vaultEntries.forEach { entry ->
+                        DropdownMenuItem(
+                            text = { Text(entry.displayName) },
+                            onClick = {
+                                selectedVaultId = entry.id
+                                vaultMenuExpanded = false
+                            },
+                        )
+                    }
+                }
             }
-            TextButton(
-                onClick = {
-                    val raw = clipboard.getText()?.text.orEmpty()
-                    if (raw.isNotBlank()) applyKeyHex(raw)
+        } else {
+            if (vaultEntries.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.card_auth_vault_empty_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedTextField(
+                value = draftKeyHex,
+                onValueChange = { applyKeyHex(it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.card_key_hex)) },
+                supportingText = {
+                    Text(
+                        stringResource(
+                            R.string.card_key_hex_support,
+                            draftKeyHex.length,
+                            groupHex(draftKeyHex).ifEmpty { "—" },
+                        ),
+                    )
                 },
+                singleLine = true,
                 enabled = !busy,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                ),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.card_key_paste))
+                TextButton(
+                    onClick = {
+                        draftKeyHex = Hex.encode(AesConstants.FACTORY_KEY)
+                        localError = null
+                    },
+                    enabled = !busy,
+                ) {
+                    Text(stringResource(R.string.card_key_factory))
+                }
+                TextButton(
+                    onClick = {
+                        val raw = clipboard.getText()?.text.orEmpty()
+                        if (raw.isNotBlank()) applyKeyHex(raw)
+                    },
+                    enabled = !busy,
+                ) {
+                    Text(stringResource(R.string.card_key_paste))
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = saveToVault,
+                    onCheckedChange = { saveToVault = it },
+                    enabled = !busy,
+                )
+                Text(stringResource(R.string.card_auth_save_vault))
+            }
+            if (saveToVault) {
+                OutlinedTextField(
+                    value = saveName,
+                    onValueChange = { saveName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.vault_name)) },
+                    singleLine = true,
+                    enabled = !busy,
+                )
             }
         }
 
-        val canSubmit = !busy && draftKeyHex.length == 32 && selectedAid != null
+        fun submit() {
+            if (useVault) {
+                val id = selectedVaultId ?: return
+                onAuthenticate(
+                    AuthMaterialRequest(keyNo = draftKeyNo, vaultEntryId = id),
+                )
+            } else {
+                if (draftKeyHex.length != 32) return
+                onAuthenticate(
+                    AuthMaterialRequest(
+                        keyNo = draftKeyNo,
+                        keyHex = draftKeyHex,
+                        saveAsVaultName = saveName.trim().takeIf { saveToVault && it.isNotEmpty() },
+                    ),
+                )
+            }
+        }
+
         if (authenticated) {
             OutlinedButton(
-                onClick = { onAuthenticate(draftKeyNo, draftKeyHex) },
+                onClick = { submit() },
                 enabled = canSubmit,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -615,7 +765,7 @@ private fun AuthSheetContent(
             }
         } else {
             Button(
-                onClick = { onAuthenticate(draftKeyNo, draftKeyHex) },
+                onClick = { submit() },
                 enabled = canSubmit,
                 modifier = Modifier.fillMaxWidth(),
             ) {

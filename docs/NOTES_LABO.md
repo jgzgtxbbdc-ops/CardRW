@@ -107,7 +107,7 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **v0.6 U2** — auth bottom sheet + session sticky (2026-07-22)
 - [ ] **v0.6 U3–U5** — clés candidates, arbre PICC, polish (voir spec)
 - [x] **Coffre K0** — spec `docs/UX_COFFRE_CLES.md` (2026-07-22)
-- [ ] **Coffre K1–K2** — persistance + dropdown/save à l’auth (après U2 de préférence)
+- [x] **Coffre K1–K2** — EncryptedPrefs + écran + sheet dropdown/save (2026-07-22)
 - [ ] Arbitrage EV2 avant writes
 - [ ] v1 : write / create / ChangeKey / dumps (WriteData header=7, ChangeKey header=1)
 
