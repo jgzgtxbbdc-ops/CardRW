@@ -1088,15 +1088,20 @@ class CardViewModel @Inject constructor(
 
     /**
      * WriteData sur le fichier [fileNo] (hex compact).
+     *
+     * DESFire n’efface **pas** le reste du fichier : seuls offset…offset+len sont
+     * écrasés. Si [padToFileSize] et taille connue, on étend le buffer avec des
+     * `0x00` jusqu’à la taille du fichier (écriture « remplacer tout » labo).
+     *
      * Mode SM déduit des FileSettings + session (Free → PLAIN, même si fichier FULL).
      */
-    fun writeFileData(fileNo: Int, dataHex: String) {
+    fun writeFileData(fileNo: Int, dataHex: String, padToFileSize: Boolean = false) {
         val clean = dataHex.replace(Regex("[^0-9a-fA-F]"), "")
         viewModelScope.launch {
             _ui.update {
                 it.copy(busy = true, errorMessage = null, statusLine = "WriteData fichier $fileNo…")
             }
-            val bytes = try {
+            var bytes = try {
                 require(clean.length % 2 == 0) { "hex impair (${clean.length})" }
                 Hex.decode(clean)
             } catch (e: Exception) {
@@ -1107,6 +1112,25 @@ class CardViewModel @Inject constructor(
             }
             val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
             val settings = _ui.value.explore?.files?.find { it.fileNo == fileNo }?.settings
+            val fileSize = settings?.sizeBytes
+            var padNote = ""
+            if (padToFileSize && fileSize != null) {
+                when {
+                    bytes.size > fileSize -> {
+                        _ui.update {
+                            it.copy(
+                                busy = false,
+                                errorMessage = "Données (${bytes.size} o) > taille fichier ($fileSize o).",
+                            )
+                        }
+                        return@launch
+                    }
+                    bytes.size < fileSize -> {
+                        bytes = bytes + ByteArray(fileSize - bytes.size)
+                        padNote = " · pad 00 → $fileSize o"
+                    }
+                }
+            }
             val mode = settings?.effectiveCommModeForWrite(sessionKey)
                 ?: com.cardrw.desfire.model.CommMode.PLAIN
             val modeHint = when (mode) {
@@ -1114,7 +1138,9 @@ class CardViewModel @Inject constructor(
                 com.cardrw.desfire.model.CommMode.MACED -> "MAC"
                 com.cardrw.desfire.model.CommMode.FULL -> "FULL"
             }
-            _ui.update { it.copy(statusLine = "WriteData fichier $fileNo ($modeHint)…") }
+            _ui.update {
+                it.copy(statusLine = "WriteData fichier $fileNo ($modeHint$padNote)…")
+            }
             val result = withContext(Dispatchers.IO) {
                 withLiveClient { client ->
                     client.writeData(fileNo, bytes, offset = 0, commMode = mode)
@@ -1125,7 +1151,8 @@ class CardViewModel @Inject constructor(
                     _ui.update {
                         it.copy(
                             busy = false,
-                            statusLine = "WriteData OK — $n o → fichier $fileNo",
+                            statusLine = "WriteData OK — $n o → fichier $fileNo" +
+                                if (padNote.isNotEmpty()) " (fichier entier)" else " (partiel dès offset 0)",
                             errorMessage = null,
                         )
                     }

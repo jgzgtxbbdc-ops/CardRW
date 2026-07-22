@@ -380,7 +380,7 @@ private fun ReadyMonitor(
                 busy = ui.busy,
                 onCreateApp = { aid -> viewModel.createApplicationLab(aid) },
                 onCreateFile = { fileNo, size -> viewModel.createStdFileLab(fileNo, size) },
-                onWrite = { fileNo, hex -> viewModel.writeFileData(fileNo, hex) },
+                onWrite = { fileNo, hex, pad -> viewModel.writeFileData(fileNo, hex, pad) },
             )
 
             if (identity.rawNotes.isNotEmpty()) {
@@ -934,7 +934,7 @@ private fun LabWriteSection(
     busy: Boolean,
     onCreateApp: (String) -> Unit,
     onCreateFile: (fileNo: Int, size: Int) -> Unit,
-    onWrite: (fileNo: Int, hex: String) -> Unit,
+    onWrite: (fileNo: Int, hex: String, padToFileSize: Boolean) -> Unit,
 ) {
     val session = ui.authSession
     val authenticated = session?.authenticated == true
@@ -945,6 +945,9 @@ private fun LabWriteSection(
     var fileNoText by rememberSaveable { mutableStateOf("0") }
     var fileSizeText by rememberSaveable { mutableStateOf("16") }
     var writeHex by rememberSaveable { mutableStateOf("0011223344556677") }
+    var padToFileSize by rememberSaveable { mutableStateOf(true) }
+    val fileNo = fileNoText.toIntOrNull() ?: 0
+    val knownSize = ui.explore?.files?.find { it.fileNo == fileNo }?.settings?.sizeBytes
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1058,6 +1061,11 @@ private fun LabWriteSection(
                     text = stringResource(R.string.card_lab_write_data),
                     style = MaterialTheme.typography.labelMedium,
                 )
+                Text(
+                    text = stringResource(R.string.card_lab_write_partial_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
                     value = writeHex,
                     onValueChange = {
@@ -1066,15 +1074,31 @@ private fun LabWriteSection(
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.card_lab_write_hex)) },
                     supportingText = {
-                        Text("${writeHex.length / 2} o · fichier $fileNoText")
+                        val n = writeHex.length / 2
+                        val sizePart = knownSize?.let { " / ${it}o fichier" }.orEmpty()
+                        Text("$n o écrits dès offset 0$sizePart")
                     },
                     enabled = !busy,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = padToFileSize,
+                        onCheckedChange = { padToFileSize = it },
+                        enabled = !busy && knownSize != null,
+                    )
+                    Text(
+                        text = if (knownSize != null) {
+                            stringResource(R.string.card_lab_write_pad, knownSize)
+                        } else {
+                            stringResource(R.string.card_lab_write_pad_unknown)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 Button(
                     onClick = {
-                        val fn = fileNoText.toIntOrNull() ?: 0
-                        onWrite(fn, writeHex)
+                        onWrite(fileNo, writeHex, padToFileSize && knownSize != null)
                     },
                     enabled = !busy && writeHex.length >= 2 && writeHex.length % 2 == 0,
                     modifier = Modifier.fillMaxWidth(),

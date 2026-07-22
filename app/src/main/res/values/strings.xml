@@ -76,6 +76,9 @@
     <string name="card_lab_file_size">Taille (o)</string>
     <string name="card_lab_create_file_action">CreateStdDataFile (FULL, Free)</string>
     <string name="card_lab_write_data">WriteData (mode auto : Free→PLAIN, sinon settings fichier)</string>
+    <string name="card_lab_write_partial_hint">WriteData n’efface pas le reste du fichier : seuls les N octets dès l’offset 0 sont remplacés. Les octets au-delà restent inchangés (comportement DESFire Standard Data).</string>
+    <string name="card_lab_write_pad">Compléter avec 00 jusqu’à %1$d o (remplacer tout le fichier)</string>
+    <string name="card_lab_write_pad_unknown">Compléter avec 00 (taille fichier inconnue — explore d’abord)</string>
     <string name="card_lab_write_hex">Données hex</string>
     <string name="card_lab_write_action">WriteData</string>
     <string name="card_error">Erreur de lecture</string>
