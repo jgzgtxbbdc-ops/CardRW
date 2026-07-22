@@ -9,6 +9,8 @@ import com.cardrw.app.data.repository.AidNameRepository
 import com.cardrw.app.data.repository.ApduJournalRepository
 import com.cardrw.app.data.repository.KeyVaultRepository
 import com.cardrw.app.nfc.IsoDepTransceiver
+import com.cardrw.app.nfc.NfcReaderController
+import com.cardrw.app.nfc.NfcTagBus
 import com.cardrw.desfire.client.DesfireClient
 import com.cardrw.desfire.client.DesfireProtocolException
 import com.cardrw.desfire.client.DesfireTransportException
@@ -61,6 +63,7 @@ class CardViewModel @Inject constructor(
     private val journalRepository: ApduJournalRepository,
     private val aidNames: AidNameRepository,
     private val keyVault: KeyVaultRepository,
+    private val tagBus: NfcTagBus,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CardUiState())
@@ -76,6 +79,20 @@ class CardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch { keyVault.load() }
+        // Tags via MainActivity reader mode + NfcTagBus (pending si navigation depuis Accueil)
+        viewModelScope.launch {
+            tagBus.consumePending()?.let { handleIncomingTag(it) }
+            tagBus.tags.collect { tag ->
+                tagBus.clearPending(tag)
+                handleIncomingTag(tag)
+            }
+        }
+    }
+
+    private fun handleIncomingTag(tag: Tag) {
+        if (NfcReaderController.isIsoDep(tag)) {
+            onTagDiscovered(tag)
+        }
     }
 
     fun friendlyName(aidHex: String): String? = aidNames.nameFor(aidHex)

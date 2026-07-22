@@ -1,6 +1,5 @@
 package com.cardrw.app.ui.screens.card
 
-import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -53,7 +52,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -65,7 +63,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -75,7 +72,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cardrw.app.R
 import com.cardrw.app.data.model.KeyVaultEntryMeta
-import com.cardrw.app.nfc.NfcReaderController
 import com.cardrw.app.viewmodel.CardPhase
 import com.cardrw.app.viewmodel.CardUiState
 import com.cardrw.app.viewmodel.CardViewModel
@@ -96,19 +92,7 @@ fun CardScreen(
     viewModel: CardViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
-    val activity = LocalContext.current as Activity
-
-    DisposableEffect(activity) {
-        val controller = NfcReaderController(activity) { tag ->
-            if (NfcReaderController.isIsoDep(tag)) {
-                viewModel.onTagDiscovered(tag)
-            }
-        }
-        if (controller.isAvailable && controller.isEnabled) {
-            controller.start()
-        }
-        onDispose { controller.stop() }
-    }
+    // NFC : reader mode dans MainActivity + NfcTagBus → CardViewModel (pas ici)
 
     Scaffold(
         topBar = {

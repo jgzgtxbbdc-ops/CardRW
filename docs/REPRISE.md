@@ -19,6 +19,7 @@
 | **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
 | **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0–U2 ✅** — U3→U5 à faire |
+| **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | Décision EV2 avant écritures massives | ⬜ à trancher (parc cartes) |
 | **v1** Write / Create / ChangeKey / dumps | ⬜ après U1+ (idéal U2–U3) |

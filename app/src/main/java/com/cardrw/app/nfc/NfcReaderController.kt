@@ -8,6 +8,9 @@ import android.os.Bundle
 
 /**
  * Active [NfcAdapter.enableReaderMode] — flux NFC principal (CDC §6 / §11.21).
+ *
+ * Doit rester actif sur l’Activity **au premier plan** (voir [com.cardrw.app.MainActivity])
+ * pour éviter le chooser système « Tag NFC détecté ».
  */
 class NfcReaderController(
     private val activity: Activity,
