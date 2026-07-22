@@ -85,6 +85,7 @@ import com.cardrw.desfire.model.AuthIntent
 import com.cardrw.desfire.model.AuthKeyPlan
 import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.CardIdentity
+import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.model.VersionInfo
 import com.cardrw.desfire.session.AuthSession
@@ -192,9 +193,13 @@ private fun ReadyMonitor(
     var authPlan by remember { mutableStateOf<AuthKeyPlan?>(null) }
     var neverMessage by remember { mutableStateOf<String?>(null) }
     var closeSheetWhenAuthSettles by remember { mutableStateOf(false) }
+    var writeTarget by remember { mutableStateOf<FileNode?>(null) }
     // U5 : conserver / restaurer la position de scroll après auth / explore
     val monitorScroll = rememberScrollState()
     var savedScrollPx by rememberSaveable { mutableIntStateOf(0) }
+    val writeEnabled = authenticated &&
+        ui.authSession?.smLevel != SecureMessagingLevel.DES_LEGACY &&
+        ui.authSession?.smLevel != SecureMessagingLevel.NONE
 
     LaunchedEffect(ui.busy) {
         if (ui.busy) {
@@ -345,13 +350,14 @@ private fun ReadyMonitor(
                 VersionTechnicalSection(version = version)
             }
 
-            // U4 — arbre PICC super-nœud → apps → fichiers (plus de liste plate)
+            // U4 — arbre PICC super-nœud → apps → fichiers
             DesfireCardTree(
                 applications = identity.applications,
                 selectedAidHex = ui.selectedAidHex,
                 exploreByAid = ui.exploreByAid,
                 busy = ui.busy,
                 sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber,
+                writeEnabled = writeEnabled,
                 friendlyName = viewModel::friendlyName,
                 onSelectPicc = {
                     viewModel.selectApplication("000000", tryDefaultAuth = false)
@@ -367,20 +373,19 @@ private fun ReadyMonitor(
                 },
                 onRefresh = { viewModel.explore() },
                 onAuthForFile = { node ->
-                    // Clé déjà mémorisée pour ce droit → re-auth auto, pas de sheet
                     if (!viewModel.tryAuthFileWithRemembered(node)) {
                         openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
                     }
                 },
+                onWriteFile = { node -> writeTarget = node },
             )
 
-            // v1 labo — écriture (session AES)
-            LabWriteSection(
+            // Création app / fichier (écriture fichier = sheet sur le nœud)
+            LabCreateSection(
                 ui = ui,
                 busy = ui.busy,
                 onCreateApp = { aid -> viewModel.createApplicationLab(aid) },
                 onCreateFile = { fileNo, size -> viewModel.createStdFileLab(fileNo, size) },
-                onWrite = { fileNo, hex, pad -> viewModel.writeFileData(fileNo, hex, pad) },
             )
 
             if (identity.rawNotes.isNotEmpty()) {
@@ -465,6 +470,36 @@ private fun ReadyMonitor(
                 }
             },
         )
+    }
+
+    // Write contextuel (fichier de l’arbre)
+    writeTarget?.let { node ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { if (!ui.busy) writeTarget = null },
+            sheetState = sheetState,
+        ) {
+            WriteFileSheetContent(
+                node = node,
+                busy = ui.busy,
+                errorMessage = ui.errorMessage,
+                onDismiss = { if (!ui.busy) writeTarget = null },
+                onWrite = { hex, pad ->
+                    viewModel.writeFileData(node.fileNo, hex, pad)
+                },
+            )
+        }
+    }
+
+    // Fermer la sheet write après succès (busy → false + pas d’erreur récente)
+    LaunchedEffect(ui.busy, ui.statusLine, ui.errorMessage) {
+        if (writeTarget != null &&
+            !ui.busy &&
+            ui.errorMessage == null &&
+            ui.statusLine?.startsWith("WriteData OK") == true
+        ) {
+            writeTarget = null
+        }
     }
 }
 
@@ -925,29 +960,26 @@ private fun AuthSheetContent(
 }
 
 /**
- * Panneau labo v1 : CreateApplication / CreateStdDataFile / WriteData.
- * Visible dès qu’une session auth existe (DES = message d’aide ; AES = actions).
+ * Création structure labo (app / fichier). L’écriture se fait via sheet sur le nœud fichier.
  */
 @Composable
-private fun LabWriteSection(
+private fun LabCreateSection(
     ui: CardUiState,
     busy: Boolean,
     onCreateApp: (String) -> Unit,
     onCreateFile: (fileNo: Int, size: Int) -> Unit,
-    onWrite: (fileNo: Int, hex: String, padToFileSize: Boolean) -> Unit,
 ) {
     val session = ui.authSession
     val authenticated = session?.authenticated == true
     val isDes = session?.smLevel == SecureMessagingLevel.DES_LEGACY
+    val isAes = authenticated && !isDes
     val isPicc = ui.selectedAidHex.equals("000000", ignoreCase = true)
     var expanded by rememberSaveable { mutableStateOf(false) }
     var aidHex by rememberSaveable { mutableStateOf("F00102") }
-    var fileNoText by rememberSaveable { mutableStateOf("0") }
     var fileSizeText by rememberSaveable { mutableStateOf("16") }
-    var writeHex by rememberSaveable { mutableStateOf("0011223344556677") }
-    var padToFileSize by rememberSaveable { mutableStateOf(true) }
-    val fileNo = fileNoText.toIntOrNull() ?: 0
-    val knownSize = ui.explore?.files?.find { it.fileNo == fileNo }?.settings?.sizeBytes
+
+    val existing = ui.explore?.files?.map { it.fileNo }?.toSet().orEmpty()
+    val nextFileNo = (0..31).firstOrNull { it !in existing } ?: 0
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -962,12 +994,18 @@ private fun LabWriteSection(
                     .clickable { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = stringResource(R.string.card_lab_write_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.card_lab_create_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(R.string.card_lab_create_subtitle),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                     contentDescription = null,
@@ -975,137 +1013,198 @@ private fun LabWriteSection(
             }
             if (!expanded) return@Column
 
-            Text(
-                text = stringResource(R.string.card_lab_write_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            if (!authenticated) {
-                Text(
+            when {
+                !authenticated -> Text(
                     text = stringResource(R.string.card_lab_write_need_auth),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                return@Column
-            }
-            if (isDes) {
-                Text(
+                isDes -> Text(
                     text = stringResource(R.string.card_lab_write_des_block),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
-                return@Column
-            }
-
-            if (isPicc) {
-                Text(
-                    text = stringResource(R.string.card_lab_create_app),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                OutlinedTextField(
-                    value = aidHex,
-                    onValueChange = {
-                        aidHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(6)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.card_lab_aid_hex)) },
-                    singleLine = true,
-                    enabled = !busy,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                )
-                Button(
-                    onClick = { onCreateApp(aidHex) },
-                    enabled = !busy && aidHex.length == 6,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.card_lab_create_app_action))
-                }
-            } else {
-                Text(
-                    text = stringResource(R.string.card_lab_create_file),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                isPicc && isAes -> {
+                    Text(
+                        text = stringResource(R.string.card_lab_create_app),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                     OutlinedTextField(
-                        value = fileNoText,
-                        onValueChange = { fileNoText = it.filter { c -> c.isDigit() }.take(2) },
-                        modifier = Modifier.weight(1f),
-                        label = { Text(stringResource(R.string.card_lab_file_no)) },
+                        value = aidHex,
+                        onValueChange = {
+                            aidHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(6)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.card_lab_aid_hex)) },
                         singleLine = true,
                         enabled = !busy,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    )
+                    Button(
+                        onClick = { onCreateApp(aidHex) },
+                        enabled = !busy && aidHex.length == 6,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.card_lab_create_app_action))
+                    }
+                }
+                !isPicc && isAes -> {
+                    Text(
+                        text = stringResource(R.string.card_lab_create_file_simple, nextFileNo),
+                        style = MaterialTheme.typography.labelMedium,
                     )
                     OutlinedTextField(
                         value = fileSizeText,
                         onValueChange = { fileSizeText = it.filter { c -> c.isDigit() }.take(4) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         label = { Text(stringResource(R.string.card_lab_file_size)) },
                         singleLine = true,
                         enabled = !busy,
                     )
-                }
-                OutlinedButton(
-                    onClick = {
-                        val fn = fileNoText.toIntOrNull() ?: 0
-                        val sz = fileSizeText.toIntOrNull() ?: 16
-                        onCreateFile(fn, sz)
-                    },
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.card_lab_create_file_action))
-                }
-
-                HorizontalDivider()
-                Text(
-                    text = stringResource(R.string.card_lab_write_data),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Text(
-                    text = stringResource(R.string.card_lab_write_partial_hint),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = writeHex,
-                    onValueChange = {
-                        writeHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(104)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.card_lab_write_hex)) },
-                    supportingText = {
-                        val n = writeHex.length / 2
-                        val sizePart = knownSize?.let { " / ${it}o fichier" }.orEmpty()
-                        Text("$n o écrits dès offset 0$sizePart")
-                    },
-                    enabled = !busy,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = padToFileSize,
-                        onCheckedChange = { padToFileSize = it },
-                        enabled = !busy && knownSize != null,
-                    )
-                    Text(
-                        text = if (knownSize != null) {
-                            stringResource(R.string.card_lab_write_pad, knownSize)
-                        } else {
-                            stringResource(R.string.card_lab_write_pad_unknown)
+                    Button(
+                        onClick = {
+                            val sz = fileSizeText.toIntOrNull() ?: 16
+                            onCreateFile(nextFileNo, sz)
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.card_lab_create_file_action_simple, nextFileNo))
+                    }
+                    Text(
+                        text = stringResource(R.string.card_lab_write_via_file),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Button(
-                    onClick = {
-                        onWrite(fileNo, writeHex, padToFileSize && knownSize != null)
-                    },
-                    enabled = !busy && writeHex.length >= 2 && writeHex.length % 2 == 0,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.card_lab_write_action))
-                }
+                else -> Text(
+                    text = stringResource(R.string.card_lab_write_need_auth),
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
+        }
+    }
+}
+
+/** Sheet d’écriture pour un fichier précis. */
+@Composable
+private fun WriteFileSheetContent(
+    node: FileNode,
+    busy: Boolean,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onWrite: (hex: String, padToFileSize: Boolean) -> Unit,
+) {
+    val size = node.settings.sizeBytes
+    val current = node.dataHex.orEmpty()
+    var writeHex by remember(node.fileNo, current) {
+        mutableStateOf(current.ifEmpty { "00" })
+    }
+    var replaceAll by rememberSaveable(node.fileNo) { mutableStateOf(true) }
+    val nBytes = writeHex.length / 2
+    val tooLong = size != null && nBytes > size
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.card_write_sheet_title, node.fileNo),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = buildString {
+                append(node.settings.summaryLabel)
+                append(" · W=")
+                append(node.settings.accessRights.writeLabel)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (current.isNotEmpty()) {
+            Text(
+                text = stringResource(R.string.card_write_sheet_current),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+                text = prettyHex(current),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+            TextButton(
+                onClick = { writeHex = current },
+                enabled = !busy,
+            ) {
+                Text(stringResource(R.string.card_write_sheet_use_current))
+            }
+        }
+        OutlinedTextField(
+            value = writeHex,
+            onValueChange = {
+                writeHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(104)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.card_write_sheet_hex)) },
+            supportingText = {
+                val sizeHint = size?.let { " · fichier ${it}o" }.orEmpty()
+                Text("$nBytes o$sizeHint")
+            },
+            isError = tooLong,
+            enabled = !busy,
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        )
+        if (size != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = replaceAll,
+                    onCheckedChange = { replaceAll = it },
+                    enabled = !busy,
+                )
+                Text(
+                    text = stringResource(R.string.card_write_sheet_replace_all, size),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (!replaceAll && nBytes < size) {
+                Text(
+                    text = stringResource(R.string.card_write_sheet_partial_warn, nBytes, size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        if (errorMessage != null) {
+            Text(
+                text = errorMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        Button(
+            onClick = { onWrite(writeHex, replaceAll && size != null) },
+            enabled = !busy && writeHex.length >= 2 && writeHex.length % 2 == 0 && !tooLong,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            BusyLabel(
+                busy = busy,
+                text = if (replaceAll && size != null) {
+                    stringResource(R.string.card_write_sheet_action_full)
+                } else {
+                    stringResource(R.string.card_write_sheet_action_partial, nBytes)
+                },
+            )
+        }
+        TextButton(
+            onClick = onDismiss,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.card_auth_cancel))
         }
     }
 }

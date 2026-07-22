@@ -55,6 +55,7 @@ import com.cardrw.desfire.model.AuthIntent
 import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.KeySettingsInfo
+import com.cardrw.desfire.model.canWriteWith
 
 /**
  * Arbre moniteur U4 : **PICC super-nœud → applications → fichiers**.
@@ -70,6 +71,8 @@ fun DesfireCardTree(
     exploreByAid: Map<String, ApplicationExploreResult>,
     busy: Boolean,
     sessionKey: Int?,
+    /** true = session AES (pas DES) prête pour Write labo. */
+    writeEnabled: Boolean = false,
     friendlyName: (String) -> String?,
     onSelectPicc: () -> Unit,
     onDoubleSelectPicc: () -> Unit,
@@ -77,6 +80,7 @@ fun DesfireCardTree(
     onDoubleSelectApp: (String) -> Unit,
     onRefresh: () -> Unit,
     onAuthForFile: (FileNode) -> Unit,
+    onWriteFile: (FileNode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val isPiccSelected = selectedAidHex.equals("000000", ignoreCase = true)
@@ -173,10 +177,12 @@ fun DesfireCardTree(
                             explore = explore,
                             busy = busy,
                             sessionKey = sessionKey.takeIf { selected },
+                            writeEnabled = writeEnabled,
                             onSelect = { onSelectApp(hex) },
                             onDoubleSelect = { onDoubleSelectApp(hex) },
                             onRefresh = onRefresh,
                             onAuthForFile = onAuthForFile,
+                            onWriteFile = onWriteFile,
                         )
                     }
                 }
@@ -194,10 +200,12 @@ private fun AppTreeNode(
     explore: ApplicationExploreResult?,
     busy: Boolean,
     sessionKey: Int?,
+    writeEnabled: Boolean,
     onSelect: () -> Unit,
     onDoubleSelect: () -> Unit,
     onRefresh: () -> Unit,
     onAuthForFile: (FileNode) -> Unit,
+    onWriteFile: (FileNode) -> Unit,
 ) {
     val structureComplete = explore != null &&
         (explore.keySettings != null || explore.structureFromCache || explore.files.isNotEmpty() ||
@@ -286,7 +294,9 @@ private fun AppTreeNode(
                                 node = node,
                                 busy = busy,
                                 sessionKey = sessionKey,
+                                writeEnabled = writeEnabled,
                                 onAuthForRead = { onAuthForFile(node) },
+                                onWrite = { onWriteFile(node) },
                             )
                         }
                     }
@@ -322,7 +332,9 @@ private fun FileTreeNode(
     node: FileNode,
     busy: Boolean,
     sessionKey: Int?,
+    writeEnabled: Boolean,
     onAuthForRead: () -> Unit,
+    onWrite: () -> Unit,
 ) {
     var expanded by rememberSaveable(node.fileNo) { mutableStateOf(false) }
     val rights = node.settings.accessRights
@@ -332,6 +344,8 @@ private fun FileTreeNode(
     val needsAuthForRead = node.dataHex == null && readPlan.barrier == AuthBarrier.NEEDS_KEY
     val neverRead = readPlan.barrier == AuthBarrier.NEVER
     val dataHex = node.dataHex
+    val canWrite = writeEnabled &&
+        (rights.isWriteFree || rights.canWriteWith(sessionKey))
     // Plein = contenu lu, Free, Never (état final), ou erreur connue
     val complete = dataHex != null ||
         neverRead ||
@@ -423,25 +437,39 @@ private fun FileTreeNode(
             modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (needsAuthForRead) {
-                val keysLabel = readPlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
-                TextButton(
-                    onClick = onAuthForRead,
-                    enabled = !busy,
-                ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (needsAuthForRead) {
+                    val keysLabel = readPlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
+                    TextButton(
+                        onClick = onAuthForRead,
+                        enabled = !busy,
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.card_file_auth_to_read,
+                                keysLabel.ifEmpty { "?" },
+                            ),
+                        )
+                    }
+                } else if (neverRead && dataHex == null) {
                     Text(
-                        stringResource(
-                            R.string.card_file_auth_to_read,
-                            keysLabel.ifEmpty { "?" },
-                        ),
+                        text = stringResource(R.string.card_file_read_never),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 8.dp),
                     )
                 }
-            } else if (neverRead && dataHex == null) {
-                Text(
-                    text = stringResource(R.string.card_file_read_never),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+                if (canWrite) {
+                    TextButton(
+                        onClick = onWrite,
+                        enabled = !busy,
+                    ) {
+                        Text(stringResource(R.string.card_file_write_action))
+                    }
+                }
             }
 
             AnimatedVisibility(visible = expanded) {
