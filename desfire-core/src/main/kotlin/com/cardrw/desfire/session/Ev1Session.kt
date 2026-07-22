@@ -11,21 +11,21 @@ import com.cardrw.desfire.util.Hex
 /**
  * Session d’authentification AES + secure messaging EV1 (CDC §5.2 / §3.2).
  *
- * Invalidée par [invalidate] (SelectApplication, perte de champ, échec crypto).
+ * Invalidée par SelectApplication, perte de champ, échec crypto.
  */
 class Ev1Session private constructor(
-    val aidHex: String,
-    val keyNumber: Int,
+    override val aidHex: String,
+    override val keyNumber: Int,
     val sessionKey: ByteArray,
     private val cmac: DesfireCmac,
     private val iv: ByteArray,
-) {
-    val smLevel: SecureMessagingLevel = SecureMessagingLevel.EV1
-    val authenticated: Boolean = true
+) : DesfireSecureSession {
+    override val smLevel: SecureMessagingLevel = SecureMessagingLevel.EV1
+    override val authenticated: Boolean = true
 
-    val badgeLabel: String get() = smLevel.badgeLabel
+    override val badgeLabel: String get() = smLevel.badgeLabel
 
-    fun toAuthSession(): AuthSession = AuthSession(
+    override fun toAuthSession(): AuthSession = AuthSession(
         aidHex = aidHex,
         keyNumber = keyNumber,
         smLevel = smLevel,
@@ -65,11 +65,11 @@ class Ev1Session private constructor(
      *        APDU en mode FULL (0 = chiffre tout le data). Ignoré en PLAIN / MACED.
      * @return data field APDU (MAC / ciphertext éventuels) — **sans** l’opcode
      */
-    fun prepareCommand(
+    override fun prepareCommand(
         opcode: Int,
         data: ByteArray,
         mode: CommMode,
-        clearHeaderLength: Int = 0,
+        clearHeaderLength: Int,
     ): ByteArray {
         val cmdByte = (opcode and 0xFF).toByte()
         return when (mode) {
@@ -104,7 +104,7 @@ class Ev1Session private constructor(
      * Post-traite une réponse carte : [responseData] sans SW, [sw2] status DESFire.
      * @return payload utile déchiffré / sans MAC
      */
-    fun postprocessResponse(
+    override fun postprocessResponse(
         responseData: ByteArray,
         sw2: Int,
         mode: CommMode,
@@ -164,16 +164,6 @@ class Ev1Session private constructor(
             }
         }
     }
-
-    /**
-     * Pour les commandes « meta » (GetFileIDs, GetFileSettings…) après auth AES :
-     * TX plain+CMAC (no append), RX plain+CMAC verify.
-     */
-    fun prepareMetaCommand(opcode: Int, data: ByteArray = ByteArray(0)): ByteArray =
-        prepareCommand(opcode, data, CommMode.PLAIN)
-
-    fun postprocessMetaResponse(responseData: ByteArray, sw2: Int): ByteArray =
-        postprocessResponse(responseData, sw2, CommMode.PLAIN)
 
     companion object {
         const val CMAC_TX_LEN: Int = 8

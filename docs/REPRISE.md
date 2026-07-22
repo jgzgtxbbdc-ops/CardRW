@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-22 (U5 moniteur polish)  
+**Dernière mise à jour :** 2026-07-22 (EV2 auth + fallback)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — U5 GetCardUID auto + preview  
+**Commit :** (voir `git log -1`) — AuthenticateEV2First + SM EV2  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -22,7 +22,7 @@
 | **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
-| Décision EV2 avant écritures massives | ⬜ à trancher (parc cartes) |
+| Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
 | **v1** Write / Create / ChangeKey / dumps | ⬜ après moniteur (idéal U5) |
 
 ### v0.6 UX — moniteur Carte
@@ -169,8 +169,8 @@ NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 
 Prochaine tâche (une seule par session) :
-  A) Arbitrage SM EV2 avant Write (parc) — recommandé si write bientôt
-  B) v1 WriteData (header=7, carte sacrifiable)
+  A) Campagne parc EV2 (cocher docs/ARBITRAGE_EV2.md §6) puis v1 Write
+  B) v1 WriteData (header=7, carte sacrifiable) — EV1 validé labo
   C) K3 biométrie coffre — non prioritaire
 Ne pas committer clés prod / dumps réels / local.properties
 ```
@@ -181,12 +181,12 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — EV2** : tester refus AES EV1 (`0xAA`) avant writes massifs.  
-   - **B — v1 Write** : header=7 ; carte sacrifiable.  
+   - **A — Parc EV2** : cocher checklist `docs/ARBITRAGE_EV2.md` (labo déjà EV1).  
+   - **B — v1 Write** : header=7 ; carte sacrifiable ; SM de la session courante.  
    - **C — K3** biométrie coffre (optionnel).  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : moniteur v0.6 **clos** ; **EV2** puis Write.
+Avis fil rouge : moniteur clos + **EV2 code OK** ; Write EV1 labo possible ; valider parc si EV3 neuves.
 
 ---
 
@@ -204,7 +204,8 @@ Avis fil rouge : moniteur v0.6 **clos** ; **EV2** puis Write.
 
 ## Dettes notées (Claude / revue) — pas urgent ce soir
 
-- Auth EV2 avant create/write si parc EV2-only / EV3 “propre”  
+- Auth EV2 **livré** (`authenticateEv2First` + fallback) — valider ReadData FULL EV2 terrain  
+- AuthenticateEV2NonFirst (`0x77`) non livré
 - KDoc CMAC (mute `iv`) si pas déjà clair  
 - Wipe clés session mémoire avant open source  
 - Golden auth + ReadData FULL versionné  

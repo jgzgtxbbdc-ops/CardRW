@@ -19,7 +19,9 @@ import com.cardrw.desfire.model.KeySettingsInfo
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.model.VersionInfo
 import com.cardrw.desfire.session.AuthSession
+import com.cardrw.desfire.session.DesfireSecureSession
 import com.cardrw.desfire.session.Ev1Session
+import com.cardrw.desfire.session.Ev2Session
 import com.cardrw.desfire.session.SecureMessagingException
 import com.cardrw.desfire.status.DesfireStatus
 import com.cardrw.desfire.util.Hex
@@ -30,6 +32,7 @@ import java.security.SecureRandom
  *
  * - v0 : identité + apps
  * - v0.5 : SelectApplication, AuthenticateAES, SM EV1, explorateur lecture Standard
+ * - EV2 : AuthenticateEV2First + SM EV2 ; [authenticateAesPreferEv1] fallback auto
  */
 class DesfireClient(
     private val transceiver: DesfireTransceiver,
@@ -38,8 +41,8 @@ class DesfireClient(
     private val sessionId: String? = null,
     private val random: SecureRandom = SecureRandom(),
 ) {
-    /** Session AES EV1 courante — null si non authentifié. */
-    var session: Ev1Session? = null
+    /** Session AES EV1 ou EV2 courante — null si non authentifié. */
+    var session: DesfireSecureSession? = null
         private set
 
     /** Dernière app sélectionnée (SelectApplication) — null avant tout select. */
@@ -325,6 +328,155 @@ class DesfireClient(
         val newSession = Ev1Session.create(aidHex, keyNo, hostRndA, rndB)
         session = newSession
         return newSession
+    }
+
+    /**
+     * AuthenticateEV2First (0x71) — flux EV2 → SM EV2.
+     *
+     * @param lenCap 0 = pas de PCDCap2 (défaut labo)
+     * @param pcdCap2 6 octets si [lenCap] = 6
+     */
+    fun authenticateEv2First(
+        keyNo: Int,
+        key: ByteArray = AesConstants.FACTORY_KEY,
+        aidHex: String = session?.aidHex ?: "000000",
+        rndA: ByteArray? = null,
+        lenCap: Int = 0,
+        pcdCap2: ByteArray = ByteArray(0),
+    ): Ev2Session {
+        require(key.size == AesConstants.KEY_SIZE_BYTES) {
+            "Clé AES doit faire 16 octets, got ${key.size}"
+        }
+        require(keyNo in 0..13) { "keyNo hors plage 0–13: $keyNo" }
+        require(lenCap == 0 || (lenCap == 6 && pcdCap2.size == 6)) {
+            "LenCap=0 sans PCDCap2, ou LenCap=6 avec 6 o"
+        }
+
+        session = null
+        val iv = AesCbc.zeroIv()
+
+        // 1) 71 KeyNo LenCap [PCDCap2] → ek(RndB) + AF
+        val step1Data = byteArrayOf(keyNo.toByte(), lenCap.toByte()) +
+            if (lenCap == 6) pcdCap2 else ByteArray(0)
+        val step1 = exchange(DesfireCommand.AUTHENTICATE_EV2_FIRST, step1Data)
+        if (!step1.isAdditionalFrame) {
+            throw DesfireProtocolException(
+                "AuthenticateEV2First failed: ${step1.status.shortName} — ${step1.status.pedagogicalFr}",
+                step1,
+            )
+        }
+        if (step1.data.size != 16) {
+            throw DesfireProtocolException(
+                "AuthenticateEV2First: ek(RndB) attendu 16 o, got ${step1.data.size}",
+                step1,
+            )
+        }
+        val rndB = step1.data.copyOf()
+        AesCbc.cbcReceive(key, iv, rndB)
+
+        val hostRndA = rndA?.also {
+            require(it.size == 16) { "RndA doit faire 16 octets" }
+        } ?: ByteArray(16).also { random.nextBytes(it) }
+
+        val rndBRot = AesCbc.rotateLeft(rndB)
+        val token = hostRndA + rndBRot
+        AesCbc.cbcSend(key, iv, token)
+
+        // 2) AF + ek(RndA||RndB') → ek(RndA'||TI||PDCap2||PCDCap2) + 00
+        val step2 = exchange(DesfireCommand.ADDITIONAL_FRAME, token)
+        if (!step2.isSuccess) {
+            throw DesfireProtocolException(
+                "AuthenticateEV2First (challenge) failed: ${step2.status.shortName} — ${step2.status.pedagogicalFr}",
+                step2,
+            )
+        }
+        if (step2.data.size != 32) {
+            throw DesfireProtocolException(
+                "AuthenticateEV2First: réponse finale attendue 32 o, got ${step2.data.size}",
+                step2,
+            )
+        }
+        val plain = step2.data.copyOf()
+        AesCbc.cbcReceive(key, iv, plain)
+        // RndA'(16) || TI(4) || PDCap2(6) || PCDCap2(6)
+        val rndAPrime = plain.copyOfRange(0, 16)
+        val ti = plain.copyOfRange(16, 20)
+        val expected = AesCbc.rotateLeft(hostRndA)
+        if (!rndAPrime.contentEquals(expected)) {
+            throw DesfireProtocolException(
+                "AuthenticateEV2First: RndA' ne correspond pas — clé incorrecte ou pas EV2.",
+            )
+        }
+
+        val newSession = Ev2Session.create(
+            aidHex = aidHex,
+            keyNumber = keyNo,
+            authKey = key,
+            rndA = hostRndA,
+            rndB = rndB,
+            ti = ti,
+        )
+        session = newSession
+        return newSession
+    }
+
+    /**
+     * Auth AES : tente **EV1 (0xAA)** puis **EV2 First (0x71)** si EV1 est refusé
+     * par la carte (parc EV2-only / EV3 « propre »).
+     *
+     * @return session EV1 ou EV2
+     */
+    fun authenticateAesPreferEv1(
+        keyNo: Int,
+        key: ByteArray = AesConstants.FACTORY_KEY,
+        aidHex: String = session?.aidHex ?: "000000",
+        rndA: ByteArray? = null,
+    ): DesfireSecureSession {
+        return try {
+            authenticateAes(keyNo, key, aidHex, rndA)
+        } catch (e: DesfireProtocolException) {
+            if (!shouldFallbackToEv2(e)) throw e
+            authenticateEv2First(keyNo, key, aidHex, rndA)
+        }
+    }
+
+    /**
+     * Auth AES : tente **EV2 First** d’abord (cible EV3 propre), puis EV1.
+     */
+    fun authenticateAesPreferEv2(
+        keyNo: Int,
+        key: ByteArray = AesConstants.FACTORY_KEY,
+        aidHex: String = session?.aidHex ?: "000000",
+        rndA: ByteArray? = null,
+    ): DesfireSecureSession {
+        return try {
+            authenticateEv2First(keyNo, key, aidHex, rndA)
+        } catch (e: DesfireProtocolException) {
+            if (!shouldFallbackToEv1(e)) throw e
+            authenticateAes(keyNo, key, aidHex, rndA)
+        }
+    }
+
+    private fun shouldFallbackToEv2(e: DesfireProtocolException): Boolean {
+        val st = e.response?.status
+        val msg = e.message.orEmpty()
+        // Ne pas basculer sur simple 0xAE (souvent mauvaise clé EV1 encore supportée).
+        // EV2-only : 0xAA souvent « illegal command » / permission.
+        return st == DesfireStatus.ILLEGAL_COMMAND ||
+            st == DesfireStatus.PERMISSION_DENIED ||
+            msg.contains("Illegal", ignoreCase = true) ||
+            msg.contains("0x1C", ignoreCase = true) ||
+            msg.contains("Permission denied", ignoreCase = true) ||
+            msg.contains("not supported", ignoreCase = true)
+    }
+
+    private fun shouldFallbackToEv1(e: DesfireProtocolException): Boolean {
+        val st = e.response?.status
+        val msg = e.message.orEmpty()
+        return st == DesfireStatus.ILLEGAL_COMMAND ||
+            st == DesfireStatus.PERMISSION_DENIED ||
+            msg.contains("Illegal", ignoreCase = true) ||
+            msg.contains("0x1C", ignoreCase = true)
     }
 
     fun clearSession() {
@@ -685,7 +837,7 @@ class DesfireClient(
         } catch (e: SecureMessagingException) {
             // Fallback : certaines cartes / Free access renvoient sans CMAC malgré auth
             // si la vérif échoue sur data courte, tenter sans MAC
-            if (concat.size < Ev1Session.CMAC_TX_LEN) {
+            if (concat.size < 8) {
                 concat
             } else {
                 throw DesfireProtocolException("${command.displayName} SM: ${e.message}", response)
@@ -729,6 +881,9 @@ class DesfireClient(
             DesfireCommand.AUTHENTICATE_AES ->
                 if (data.isNotEmpty()) "AuthenticateAES (clé n°${data[0].toInt() and 0xFF})"
                 else "AuthenticateAES"
+            DesfireCommand.AUTHENTICATE_EV2_FIRST ->
+                if (data.isNotEmpty()) "AuthenticateEV2First (clé n°${data[0].toInt() and 0xFF})"
+                else "AuthenticateEV2First"
             DesfireCommand.READ_DATA ->
                 if (data.size >= 1) "ReadData (fichier ${data[0].toInt() and 0xFF})"
                 else "ReadData"
@@ -748,7 +903,11 @@ class DesfireClient(
         }
         val size = response.data.size
         val sizePart = if (size > 0) " · ${size} o" else ""
-        val authPart = if (session != null) " · SM EV1" else ""
+        val authPart = when (session?.smLevel) {
+            com.cardrw.desfire.crypto.SecureMessagingLevel.EV1 -> " · SM EV1"
+            com.cardrw.desfire.crypto.SecureMessagingLevel.EV2 -> " · SM EV2"
+            else -> ""
+        }
         return when (response.status) {
             DesfireStatus.SUCCESS -> "OK (0x00)$sizePart$authPart"
             DesfireStatus.ADDITIONAL_FRAME -> "suite (0xAF)$sizePart"

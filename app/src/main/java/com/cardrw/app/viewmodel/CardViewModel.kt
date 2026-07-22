@@ -398,7 +398,7 @@ class CardViewModel @Inject constructor(
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
                 client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                client.authenticateAes(keyNo, keyBytes, aidHex)
+                client.authenticateAesPreferEv1(keyNo, keyBytes, aidHex)
                 client.authSession
             }
         }
@@ -512,7 +512,7 @@ class CardViewModel @Inject constructor(
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
                 client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                client.authenticateAes(keyNo, keyBytes, aidHex)
+                client.authenticateAesPreferEv1(keyNo, keyBytes, aidHex)
                 client.authSession
             }
         }
@@ -747,7 +747,7 @@ class CardViewModel @Inject constructor(
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
                 client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                client.authenticateAes(keyNo, keyBytes, aidHex)
+                client.authenticateAesPreferEv1(keyNo, keyBytes, aidHex)
                 client.authSession
             }
         }
@@ -874,7 +874,7 @@ class CardViewModel @Inject constructor(
             val result = withContext(Dispatchers.IO) {
                 withLiveClient { client ->
                     client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                    client.authenticateAes(resolvedKeyNo, keyBytes, aidHex)
+                    client.authenticateAesPreferEv1(resolvedKeyNo, keyBytes, aidHex)
                     client.authSession
                 }
             }
