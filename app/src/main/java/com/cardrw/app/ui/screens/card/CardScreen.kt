@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,16 +38,21 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,6 +79,8 @@ import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.model.VersionInfo
 import com.cardrw.desfire.session.AuthSession
+import com.cardrw.desfire.crypto.AesConstants
+import com.cardrw.desfire.util.Hex
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,33 +115,50 @@ fun CardScreen(
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            when (ui.phase) {
-                CardPhase.Waiting -> WaitingCard()
-                CardPhase.Reading -> {
-                    Row(
-                        modifier = Modifier.padding(vertical = 24.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator()
-                        Text(stringResource(R.string.card_reading))
-                    }
+        when (ui.phase) {
+            CardPhase.Waiting -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    WaitingCard()
                 }
-                CardPhase.Ready -> {
-                    val identity = ui.identity
-                    if (identity != null) {
-                        ReadyContent(ui = ui, identity = identity, viewModel = viewModel)
-                    }
+            }
+            CardPhase.Reading -> {
+                Row(
+                    modifier = Modifier
+                        .padding(padding)
+                        .padding(horizontal = 16.dp, vertical = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator()
+                    Text(stringResource(R.string.card_reading))
                 }
-                CardPhase.Error -> {
+            }
+            CardPhase.Ready -> {
+                val identity = ui.identity
+                if (identity != null) {
+                    ReadyMonitor(
+                        ui = ui,
+                        identity = identity,
+                        viewModel = viewModel,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                    )
+                }
+            }
+            CardPhase.Error -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     Text(
                         text = stringResource(R.string.card_error),
                         style = MaterialTheme.typography.titleMedium,
@@ -152,119 +177,186 @@ fun CardScreen(
     }
 }
 
+/**
+ * Moniteur diagnostic (U2) : barre session sticky + scroll infos ;
+ * saisie clé dans [AuthBottomSheet], pas dans le document principal.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReadyContent(
+private fun ReadyMonitor(
     ui: CardUiState,
     identity: CardIdentity,
     viewModel: CardViewModel,
+    modifier: Modifier = Modifier,
 ) {
     val authenticated = ui.authSession?.authenticated == true
     val isPicc = ui.selectedAidHex.equals("000000", ignoreCase = true)
+    var showAuthSheet by rememberSaveable { mutableStateOf(false) }
+    var closeSheetWhenAuthSettles by remember { mutableStateOf(false) }
 
-    ProfileSummaryCard(
-        identity = identity,
-        realUidHex = ui.realUidHex,
-    )
-
-    AuthSessionBadge(
-        session = ui.authSession,
-        selectedAid = ui.selectedAidHex,
-    )
-
-    // Erreurs / statut d’opération uniquement (pas de doublon type carte)
-    if (ui.errorMessage != null) {
-        Text(
-            text = ui.errorMessage,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
-    if (ui.statusLine != null) {
-        Text(
-            text = ui.statusLine,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-
-    // GetCardUID si Random ID + auth et pas encore résolu
-    if (authenticated && identity.uidKind == UidKind.RANDOM && ui.realUidHex == null) {
-        TextButton(
-            onClick = { viewModel.fetchRealUid() },
-            enabled = !ui.busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.card_get_card_uid))
+    // Ferme la sheet après auth OK (explore auto U1 peut encore tourner : on ferme dès session OK + !busy auth phase)
+    LaunchedEffect(ui.busy, ui.authSession?.authenticated, ui.errorMessage, closeSheetWhenAuthSettles) {
+        if (!closeSheetWhenAuthSettles) return@LaunchedEffect
+        if (ui.busy) return@LaunchedEffect
+        closeSheetWhenAuthSettles = false
+        if (ui.errorMessage == null && ui.authSession?.authenticated == true) {
+            showAuthSheet = false
         }
     }
 
-    val version = identity.version
-    if (version != null) {
-        VersionTechnicalSection(version = version)
+    // Si l’auth enchaîne explore (busy reste true), fermer dès que la session est authentifiée
+    LaunchedEffect(ui.authSession?.authenticated, closeSheetWhenAuthSettles, showAuthSheet) {
+        if (showAuthSheet &&
+            closeSheetWhenAuthSettles &&
+            ui.authSession?.authenticated == true &&
+            ui.errorMessage == null
+        ) {
+            closeSheetWhenAuthSettles = false
+            showAuthSheet = false
+        }
     }
 
-    ApplicationsSection(
-        applications = identity.applications,
-        selectedAidHex = ui.selectedAidHex,
-        friendlyName = viewModel::friendlyName,
-        enabled = !ui.busy,
-        onSelect = viewModel::selectApplication,
-        onSelectPicc = { viewModel.selectApplication("000000") },
-    )
-
-    if (ui.selectedAidHex != null) {
-        AuthPanel(
-            keyNo = ui.keyNo,
-            keyHex = ui.keyHex,
-            busy = ui.busy,
-            authenticated = authenticated,
-            onKeyNo = viewModel::updateKeyNo,
-            onKeyHex = viewModel::updateKeyHex,
-            onFactoryKey = viewModel::setFactoryKey,
-            onAuth = viewModel::authenticate,
-        )
-
-        // U1 : pull auto après select/auth — bouton = Actualiser (pas la porte d’entrée)
-        OutlinedButton(
-            onClick = { viewModel.explore() },
-            enabled = !ui.busy,
-            modifier = Modifier.fillMaxWidth(),
+    Column(modifier = modifier) {
+        // --- Zone sticky (hors scroll) ---
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BusyLabel(busy = ui.busy, text = stringResource(R.string.card_action_refresh))
+            AuthSessionBar(
+                session = ui.authSession,
+                selectedAid = ui.selectedAidHex,
+                busy = ui.busy,
+                onOpenAuth = { showAuthSheet = true },
+            )
+            if (ui.errorMessage != null && !showAuthSheet) {
+                Text(
+                    text = ui.errorMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (ui.statusLine != null) {
+                Text(
+                    text = ui.statusLine,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        Text(
-            text = if (isPicc) {
-                stringResource(R.string.card_explore_hint_picc)
-            } else {
-                stringResource(R.string.card_explore_hint_app)
+
+        // --- Moniteur scrollable (données seulement) ---
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            ProfileSummaryCard(
+                identity = identity,
+                realUidHex = ui.realUidHex,
+            )
+
+            if (authenticated && identity.uidKind == UidKind.RANDOM && ui.realUidHex == null) {
+                TextButton(
+                    onClick = { viewModel.fetchRealUid() },
+                    enabled = !ui.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.card_get_card_uid))
+                }
+            }
+
+            val version = identity.version
+            if (version != null) {
+                VersionTechnicalSection(version = version)
+            }
+
+            ApplicationsSection(
+                applications = identity.applications,
+                selectedAidHex = ui.selectedAidHex,
+                friendlyName = viewModel::friendlyName,
+                enabled = !ui.busy,
+                onSelect = viewModel::selectApplication,
+                onSelectPicc = { viewModel.selectApplication("000000") },
+            )
+
+            if (ui.selectedAidHex != null) {
+                OutlinedButton(
+                    onClick = { viewModel.explore() },
+                    enabled = !ui.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    BusyLabel(busy = ui.busy, text = stringResource(R.string.card_action_refresh))
+                }
+                Text(
+                    text = if (isPicc) {
+                        stringResource(R.string.card_explore_hint_picc)
+                    } else {
+                        stringResource(R.string.card_explore_hint_app)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!isPicc) {
+                    Text(
+                        text = stringResource(R.string.card_explore_hint_twophase),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            ui.explore?.let { explore ->
+                ExplorerSection(explore = explore)
+            }
+
+            if (identity.rawNotes.isNotEmpty()) {
+                NotesSection(notes = identity.rawNotes)
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedButton(
+                onClick = { viewModel.resetToWaiting() },
+                enabled = !ui.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.card_reread))
+            }
+        }
+    }
+
+    if (showAuthSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (!ui.busy) showAuthSheet = false
             },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (!isPicc) {
-            Text(
-                text = stringResource(R.string.card_explore_hint_twophase),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+            sheetState = sheetState,
+        ) {
+            AuthSheetContent(
+                initialKeyNo = ui.keyNo,
+                initialKeyHex = ui.keyHex,
+                busy = ui.busy,
+                authenticated = authenticated,
+                selectedAid = ui.selectedAidHex,
+                errorMessage = ui.errorMessage,
+                onDismiss = {
+                    if (!ui.busy) showAuthSheet = false
+                },
+                onAuthenticate = { keyNo, keyHex ->
+                    val clean = keyHex.replace(Regex("[^0-9a-fA-F]"), "")
+                    if (clean.length == 32) {
+                        closeSheetWhenAuthSettles = true
+                        viewModel.authenticate(keyNo = keyNo, keyHex = clean)
+                    }
+                },
             )
         }
-    }
-
-    ui.explore?.let { explore ->
-        ExplorerSection(explore = explore)
-    }
-
-    if (identity.rawNotes.isNotEmpty()) {
-        NotesSection(notes = identity.rawNotes)
-    }
-
-    Spacer(modifier = Modifier.height(4.dp))
-    OutlinedButton(
-        onClick = { viewModel.resetToWaiting() },
-        enabled = !ui.busy,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.card_reread))
     }
 }
 
@@ -283,8 +375,14 @@ private fun BusyLabel(busy: Boolean, text: String) {
     }
 }
 
+/** Barre session sticky : état + porte vers la sheet auth (U2). */
 @Composable
-private fun AuthSessionBadge(session: AuthSession?, selectedAid: String?) {
+private fun AuthSessionBar(
+    session: AuthSession?,
+    selectedAid: String?,
+    busy: Boolean,
+    onOpenAuth: () -> Unit,
+) {
     val shape = RoundedCornerShape(10.dp)
     val active = session?.authenticated == true
     val bg = if (active) {
@@ -292,160 +390,244 @@ private fun AuthSessionBadge(session: AuthSession?, selectedAid: String?) {
     } else {
         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
     }
-    Column(
+    val canAuth = selectedAid != null && !busy
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(bg)
+            .clickable(enabled = canAuth, onClick = onOpenAuth)
             .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = stringResource(R.string.card_session_label),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (session?.authenticated == true) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             Text(
-                text = session.badgeLabel,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
+                text = stringResource(R.string.card_session_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                text = stringResource(
-                    R.string.card_session_detail,
-                    prettyAid(session.aidHex),
-                    session.keyNumber,
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-            )
-        } else {
-            Text(
-                text = stringResource(R.string.card_session_none),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (selectedAid != null) {
+            if (session?.authenticated == true) {
                 Text(
-                    text = stringResource(R.string.card_session_selected_app, prettyAid(selectedAid)),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = session.badgeLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
                 )
+                Text(
+                    text = stringResource(
+                        R.string.card_session_detail,
+                        prettyAid(session.aidHex),
+                        session.keyNumber,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.card_session_none),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (selectedAid != null) {
+                    Text(
+                        text = stringResource(R.string.card_session_selected_app, prettyAid(selectedAid)),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.card_session_select_app_first),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        if (selectedAid != null) {
+            if (active) {
+                OutlinedButton(
+                    onClick = onOpenAuth,
+                    enabled = canAuth,
+                ) {
+                    Text(stringResource(R.string.card_auth_change))
+                }
+            } else {
+                Button(
+                    onClick = onOpenAuth,
+                    enabled = canAuth,
+                ) {
+                    Text(stringResource(R.string.card_auth_action))
+                }
             }
         }
     }
 }
 
+/**
+ * Formulaire auth en bottom sheet (U2).
+ * Brouillon local (keyNo / keyHex) — commit vers le ViewModel à l’appui Authentifier.
+ */
 @Composable
-private fun AuthPanel(
-    keyNo: Int,
-    keyHex: String,
+private fun AuthSheetContent(
+    initialKeyNo: Int,
+    initialKeyHex: String,
     busy: Boolean,
     authenticated: Boolean,
-    onKeyNo: (Int) -> Unit,
-    onKeyHex: (String) -> Unit,
-    onFactoryKey: () -> Unit,
-    onAuth: () -> Unit,
+    selectedAid: String?,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onAuthenticate: (keyNo: Int, keyHex: String) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        ),
+    var draftKeyNo by remember { mutableIntStateOf(initialKeyNo.coerceIn(0, 13)) }
+    var draftKeyHex by remember {
+        mutableStateOf(initialKeyHex.replace(Regex("[^0-9a-fA-F]"), "").uppercase())
+    }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    fun applyKeyHex(raw: String) {
+        val clean = raw.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
+        when {
+            clean.length <= 32 -> {
+                draftKeyHex = clean
+                localError = null
+            }
+            else ->
+                localError = "Colle uniquement la clé AES (32 caractères hex), pas un journal APDU."
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Text(
+            text = stringResource(R.string.card_auth_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (selectedAid != null) {
             Text(
-                text = stringResource(R.string.card_auth_title),
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                text = stringResource(R.string.card_auth_hint),
-                style = MaterialTheme.typography.labelSmall,
+                text = stringResource(R.string.card_session_selected_app, prettyAid(selectedAid)),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        Text(
+            text = stringResource(R.string.card_auth_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        val displayError = localError ?: errorMessage
+        if (displayError != null) {
             Text(
-                text = stringResource(R.string.card_key_no),
-                style = MaterialTheme.typography.labelMedium,
+                text = displayError,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                for (n in 0..13) {
-                    FilterChip(
-                        selected = keyNo == n,
-                        onClick = { onKeyNo(n) },
-                        label = { Text("$n") },
-                        enabled = !busy,
-                    )
-                }
+        }
+
+        Text(
+            text = stringResource(R.string.card_key_no),
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            for (n in 0..13) {
+                FilterChip(
+                    selected = draftKeyNo == n,
+                    onClick = { draftKeyNo = n },
+                    label = { Text("$n") },
+                    enabled = !busy,
+                )
             }
-            // Valeur compacte (pas d’espaces) pour éviter troncature / curseur bizarre
-            OutlinedTextField(
-                value = keyHex,
-                onValueChange = onKeyHex,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.card_key_hex)) },
-                supportingText = {
-                    Text(
-                        stringResource(
-                            R.string.card_key_hex_support,
-                            keyHex.length,
-                            groupHex(keyHex).ifEmpty { "—" },
-                        ),
-                    )
+        }
+
+        OutlinedTextField(
+            value = draftKeyHex,
+            onValueChange = { applyKeyHex(it) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.card_key_hex)) },
+            supportingText = {
+                Text(
+                    stringResource(
+                        R.string.card_key_hex_support,
+                        draftKeyHex.length,
+                        groupHex(draftKeyHex).ifEmpty { "—" },
+                    ),
+                )
+            },
+            singleLine = true,
+            enabled = !busy,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Characters,
+            ),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            TextButton(
+                onClick = {
+                    draftKeyHex = Hex.encode(AesConstants.FACTORY_KEY)
+                    localError = null
                 },
-                singleLine = true,
                 enabled = !busy,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                ),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(stringResource(R.string.card_key_factory))
+            }
+            TextButton(
+                onClick = {
+                    val raw = clipboard.getText()?.text.orEmpty()
+                    if (raw.isNotBlank()) applyKeyHex(raw)
+                },
+                enabled = !busy,
+            ) {
+                Text(stringResource(R.string.card_key_paste))
+            }
+        }
+
+        val canSubmit = !busy && draftKeyHex.length == 32 && selectedAid != null
+        if (authenticated) {
+            OutlinedButton(
+                onClick = { onAuthenticate(draftKeyNo, draftKeyHex) },
+                enabled = canSubmit,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                TextButton(
-                    onClick = onFactoryKey,
-                    enabled = !busy,
-                ) {
-                    Text(stringResource(R.string.card_key_factory))
-                }
-                TextButton(
-                    onClick = {
-                        val raw = clipboard.getText()?.text.orEmpty()
-                        if (raw.isNotBlank()) onKeyHex(raw)
-                    },
-                    enabled = !busy,
-                ) {
-                    Text(stringResource(R.string.card_key_paste))
-                }
+                BusyLabel(busy = busy, text = stringResource(R.string.card_auth_again))
             }
-            if (authenticated) {
-                OutlinedButton(
-                    onClick = onAuth,
-                    enabled = !busy && keyHex.length == 32,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    BusyLabel(busy = busy, text = stringResource(R.string.card_auth_again))
-                }
-            } else {
-                Button(
-                    onClick = onAuth,
-                    enabled = !busy && keyHex.length == 32,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    BusyLabel(busy = busy, text = stringResource(R.string.card_auth_action))
-                }
+        } else {
+            Button(
+                onClick = { onAuthenticate(draftKeyNo, draftKeyHex) },
+                enabled = canSubmit,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                BusyLabel(busy = busy, text = stringResource(R.string.card_auth_action))
             }
+        }
+        TextButton(
+            onClick = onDismiss,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.card_auth_cancel))
         }
     }
 }

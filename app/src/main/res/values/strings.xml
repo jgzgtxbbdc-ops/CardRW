@@ -51,17 +51,20 @@
     <string name="card_session_label">Session</string>
     <string name="card_session_none">Sans authentification</string>
     <string name="card_session_selected_app">App %1$s sélectionnée</string>
+    <string name="card_session_select_app_first">Sélectionne une application (ou PICC) pour authentifier.</string>
     <string name="card_session_sm">%1$s</string>
     <string name="card_session_detail">App %1$s · clé %2$d</string>
     <string name="card_auth_title">Authentification AES</string>
-    <string name="card_auth_hint">AuthenticateAES → session SM EV1. Labo : clé usine 00…00.</string>
-    <string name="card_key_no">Clé n°</string>
+    <string name="card_auth_hint">AuthenticateAES → session SM EV1. Labo : clé usine 00…00. Le moniteur reste en place.</string>
+    <string name="card_key_no">Clé n° (slot carte)</string>
     <string name="card_key_hex">Clé AES-128 (32 hex)</string>
     <string name="card_key_hex_support">%1$d / 32 · ex. groupée : %2$s</string>
     <string name="card_key_factory">Usine 00…00</string>
     <string name="card_key_paste">Coller</string>
     <string name="card_auth_action">Authentifier</string>
     <string name="card_auth_again">Ré-authentifier</string>
+    <string name="card_auth_change">Changer de clé</string>
+    <string name="card_auth_cancel">Annuler</string>
     <string name="card_get_card_uid">Lire UID réel (GetCardUID)</string>
 
     <!-- Explorateur -->

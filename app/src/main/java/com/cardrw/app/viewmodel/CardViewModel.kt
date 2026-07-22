@@ -166,14 +166,28 @@ class CardViewModel @Inject constructor(
 
     /**
      * AuthenticateAES puis **re-pull auto** (structure / données selon session).
+     * @param keyNo / @param keyHex optionnels : brouillon sheet (U2) appliqué avant auth.
      */
-    fun authenticate() {
+    fun authenticate(keyNo: Int? = null, keyHex: String? = null) {
+        if (keyNo != null) {
+            _ui.update { it.copy(keyNo = keyNo.coerceIn(0, 13)) }
+        }
+        if (keyHex != null) {
+            val clean = keyHex.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
+            if (clean.length != 32) {
+                _ui.update {
+                    it.copy(errorMessage = "Clé AES invalide : attendu 32 hex (16 octets), got ${clean.length}")
+                }
+                return
+            }
+            _ui.update { it.copy(keyHex = clean, errorMessage = null) }
+        }
         val aidHex = _ui.value.selectedAidHex
         if (aidHex == null) {
             _ui.update { it.copy(errorMessage = "Sélectionne d’abord une application (ou PICC).") }
             return
         }
-        val keyNo = _ui.value.keyNo
+        val resolvedKeyNo = _ui.value.keyNo
         val keyBytes = try {
             parseKeyHex(_ui.value.keyHex)
         } catch (e: Exception) {
@@ -182,13 +196,13 @@ class CardViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _ui.update {
-                it.copy(busy = true, errorMessage = null, statusLine = "AuthenticateAES clé n°$keyNo…")
+                it.copy(busy = true, errorMessage = null, statusLine = "AuthenticateAES clé n°$resolvedKeyNo…")
             }
             val result = withContext(Dispatchers.IO) {
                 withLiveClient { client ->
                     // Pas de re-Select si déjà sur cet AID (évite double 5A dans le journal)
                     client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                    client.authenticateAes(keyNo, keyBytes, aidHex)
+                    client.authenticateAes(resolvedKeyNo, keyBytes, aidHex)
                     client.authSession
                 }
             }

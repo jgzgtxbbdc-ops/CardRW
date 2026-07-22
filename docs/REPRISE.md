@@ -18,7 +18,7 @@
 | **FACTORY_KEY** copie défensive | ✅ `51a6d52` — voir contrat ci-dessous |
 | **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
-| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0+U1 ✅** — U2→U5 à faire |
+| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0–U2 ✅** — U3→U5 à faire |
 | **Coffre-fort de clés** | 🔄 **K0 spec ✅** — code K1→K3 après U2 de préférence |
 | Décision EV2 avant écritures massives | ⬜ à trancher (parc cartes) |
 | **v1** Write / Create / ChangeKey / dumps | ⬜ après U1+ (idéal U2–U3) |
@@ -31,8 +31,8 @@
 |---|---|---|
 | **U0** | Spec 4 principes + découpage | ✅ |
 | **U1** | Pull auto post-select / post-auth ; Explorer → Actualiser | ✅ |
-| **U2** | Auth en bottom sheet ; session sticky | ⬜ **prochaine** |
-| **U3** | Clés candidates selon intention / droits | ⬜ |
+| **U2** | Auth en bottom sheet ; session sticky | ✅ |
+| **U3** | Clés candidates selon intention / droits | ⬜ **prochaine** (ou K1–K2 coffre) |
 | **U4** | Arbre PICC super-nœud ; fichiers sous apps | ⬜ |
 | **U5** | GetCardUID auto, preview hex, polish | ⬜ |
 
@@ -136,16 +136,16 @@ NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
   FACTORY_KEY + prepareCommand(clearHeaderLength) livrés (51a6d52)
-  v0.6 UX : U0+U1 ✅ ; prochaine U2 sheet auth
-  Coffre : K0 ✅ ; code K1→K3 après U2 de préférence
+  v0.6 UX : U0–U2 ✅ ; prochaine U3 candidates ou K1–K2 coffre
+  Coffre : K0 ✅ ; code K1→K2 maintenant possible (sheet auth existe)
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
-Hors scope immédiat : refaire v0/crypto livré, U4 avant U2, biométrie K3 avant mécanique K1
+Hors scope immédiat : refaire v0/crypto livré, U4 avant U3, biométrie K3 avant mécanique K1
 
 Prochaine tâche (une seule par session) :
-  A) U2 auth bottom sheet + session sticky (UX_ECRAN_CARTE.md) — recommandé
-  B) K1–K2 coffre après U2 (UX_COFFRE_CLES.md)
+  A) K1–K2 coffre-fort (UX_COFFRE_CLES.md) — bon ROI atelier
+  B) U3 clés candidates selon intention (UX_ECRAN_CARTE.md)
   C) Arbitrage SM EV2 avant Write (parc)
-  D) v1 WriteData — urgence seulement ; sinon après U2+
+  D) v1 WriteData — urgence seulement
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -155,13 +155,13 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — U2** : auth en bottom sheet ; panneau retiré du scroll ; barre session.  
-     Puis **K1–K2** coffre → U3 candidates → U4 arbre.  
-   - **B — EV2** : tester refus AES EV1 (`0xAA`) → décider avant writes massifs.  
-   - **C — v1 Write** : header=7 ; carte sacrifiable — **après U1** OK, idéal U2+.  
+   - **A — K1–K2** : coffre nommés + dropdown/save dans sheet auth.  
+   - **B — U3** : clés candidates (R/W/RW) dans la sheet.  
+   - **C — EV2** : tester refus AES EV1 (`0xAA`) avant writes massifs.  
+   - **D — v1 Write** : header=7 ; carte sacrifiable.  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : **U2 → coffre K1–K2** avant un gros Write ; pas d’arbre U4 sans U2 ; pas de biométrie avant la mécanique coffre.
+Avis fil rouge : **K1–K2 ou U3** avant U4 arbre ; pas de biométrie avant mécanique coffre.
 
 ---
 
