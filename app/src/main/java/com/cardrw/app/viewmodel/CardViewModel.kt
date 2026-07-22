@@ -24,6 +24,7 @@ import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.CardIdentity
 import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
+import com.cardrw.desfire.model.readKeyCandidates
 import com.cardrw.desfire.session.AuthSession
 import com.cardrw.desfire.util.Hex
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -122,6 +123,12 @@ class CardViewModel @Inject constructor(
     /** Dernier keyNo OK par AID (préférence re-select). */
     private val lastKeyNoByAid = mutableMapOf<String, Int>()
 
+    /**
+     * Slots déjà tentés avec la **clé standard usine** (00…00) et refusés (0xAE),
+     * pour ne pas reboucler sur une carte re-encodée. Cleared avec la mémoire session.
+     */
+    private val factoryFailedSlotsByAid = mutableMapOf<String, MutableSet<Int>>()
+
     init {
         viewModelScope.launch { keyVault.load() }
         // Tags via MainActivity reader mode + NfcTagBus (pending si navigation depuis Accueil)
@@ -199,22 +206,52 @@ class CardViewModel @Inject constructor(
     }
 
     /**
-     * CTA fichier : si une clé candidate est déjà mémorisée pour l’AID, re-auth auto
-     * sans sheet ni re-saisie. Retourne true si l’auto-auth a démarré.
+     * CTA fichier : re-auth auto si possible —
+     * 1) clé mémorisée pour un slot candidat
+     * 2) sinon **clé standard usine** (00…00) sur le slot préféré / candidat
+     * Retourne true si l’auto-auth a démarré (pas de sheet).
      */
     fun tryAuthFileWithRemembered(node: FileNode): Boolean {
         val aidHex = _ui.value.selectedAidHex ?: return false
         val plan = authPlanForFile(node)
         if (plan.barrier != AuthBarrier.NEEDS_KEY) return false
-        val remembered = rememberedKeysByAid[aidHex.uppercase()] ?: return false
+        val aidKey = aidHex.uppercase()
+        val remembered = rememberedKeysByAid[aidKey].orEmpty()
         val prefer = plan.preferKeyNo
-        val keyNo = when {
-            prefer != null && remembered.containsKey(prefer) -> prefer
-            else -> plan.candidates.map { it.keyNo }.firstOrNull { remembered.containsKey(it) }
-        } ?: return false
-        val entry = remembered[keyNo] ?: return false
+        val candidateNos = buildList {
+            prefer?.let { add(it) }
+            plan.candidates.forEach { add(it.keyNo) }
+        }.distinct()
+
+        // 1) Matériau déjà validé pour ce slot
+        val memKeyNo = candidateNos.firstOrNull { remembered.containsKey(it) }
+        if (memKeyNo != null) {
+            val entry = remembered[memKeyNo] ?: return false
+            viewModelScope.launch {
+                silentAuthThenExplore(aidHex, entry, flashMessage = REMEMBERED_AUTH_OK_MESSAGE)
+            }
+            return true
+        }
+
+        // 2) Clé standard usine sur un slot candidat pas encore raté
+        val failedFactory = factoryFailedSlotsByAid[aidKey].orEmpty()
+        val factoryKeyNo = candidateNos.firstOrNull { it !in failedFactory } ?: return false
         viewModelScope.launch {
-            silentAuthThenExplore(aidHex, entry, flashMessage = REMEMBERED_AUTH_OK_MESSAGE)
+            val ok = tryFactoryAuthThenExplore(
+                aidHex = aidHex,
+                keyNo = factoryKeyNo,
+                flashMessage = DEFAULT_AUTH_OK_MESSAGE,
+                fillAfter = true,
+            )
+            if (!ok) {
+                // Laisser l’UI proposer la sheet (nonce) pour saisie manuelle
+                _ui.update {
+                    it.copy(
+                        statusLine = "Clé standard refusée (n°$factoryKeyNo) — saisie manuelle.",
+                        openAuthSheetNonce = it.openAuthSheetNonce + 1,
+                    )
+                }
+            }
         }
         return true
     }
@@ -555,57 +592,170 @@ class CardViewModel @Inject constructor(
         }
         rememberedKeysByAid.clear()
         lastKeyNoByAid.clear()
+        factoryFailedSlotsByAid.clear()
     }
 
     /**
-     * Après une explore partielle : pour chaque fichier encore non lu, si une clé
-     * mémorisée peut le lire, bascule auto sur cette clé et re-lit (sans sheet).
-     * Les contenus déjà obtenus sous d’autres sessions restent via [mergeExplorePreserveData].
+     * Après explore : complète les lectures manquantes avec
+     * 1) clés **mémorisées** (déjà validées sur cette session)
+     * 2) **clé standard usine** 00…00 sur les slots candidats (R/RW + maître 0 structure)
      */
     private suspend fun fillUnreadWithRememberedKeys(aidHex: String) {
+        fillWithRememberedMaterials(aidHex)
+        fillWithFactoryKey(aidHex)
+    }
+
+    /** Phase 1 : rejouer les matériaux déjà OK (multi-slots). */
+    private suspend fun fillWithRememberedMaterials(aidHex: String) {
         val aidKey = aidHex.uppercase()
         val keys = rememberedKeysByAid[aidKey] ?: return
         if (keys.isEmpty()) return
 
         var guard = 0
         while (guard++ < 8) {
-            val explore = _ui.value.explore
-                ?.takeIf { it.aidHex.equals(aidHex, ignoreCase = true) }
-                ?: break
-            val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
-            val unread = explore.files.filter { node ->
-                node.dataHex == null &&
-                    node.settings.fileType == com.cardrw.desfire.model.FileType.STANDARD &&
-                    !node.settings.accessRights.isReadNever
-            }
-            if (unread.isEmpty()) break
-
-            // Choisir une clé mémorisée capable de lire au moins un fichier non lu
-            val nextKeyNo = unread.asSequence()
-                .flatMap { node ->
-                    keys.keys.asSequence().filter { k ->
-                        node.settings.accessRights.canReadWith(k)
-                    }
-                }
-                .distinct()
-                .firstOrNull { it != sessionKey }
-                ?: break
-
+            val nextKeyNo = nextSlotNeedingAuth(aidHex, preferKnown = keys.keys) ?: break
             val entry = keys[nextKeyNo] ?: break
-            _ui.update {
-                it.copy(statusLine = "Lecture auto (clé n°$nextKeyNo)…")
-            }
+            _ui.update { it.copy(statusLine = "Lecture auto (clé n°$nextKeyNo)…") }
             val ok = silentAuthThenExplore(
                 aidHex = aidHex,
                 remembered = entry,
                 flashMessage = null,
-                fillRemembered = false, // on gère la boucle ici
+                fillRemembered = false,
+            )
+            if (!ok) continue
+        }
+    }
+
+    /**
+     * Phase 2 : tenter la **clé standard** (usine 00…00) sur les slots encore utiles.
+     * Silencieux si refus (carte re-encodée) — pas de sheet spam.
+     */
+    private suspend fun fillWithFactoryKey(aidHex: String) {
+        val aidKey = aidHex.uppercase()
+        val failed = factoryFailedSlotsByAid.getOrPut(aidKey) { mutableSetOf() }
+        var guard = 0
+        while (guard++ < 8) {
+            val known = rememberedKeysByAid[aidKey]?.keys.orEmpty()
+            val nextKeyNo = nextSlotNeedingAuth(aidHex, preferKnown = null)
+                ?.takeUnless { it in known || it in failed }
+                ?: break
+
+            _ui.update {
+                it.copy(statusLine = "Auth auto clé standard (n°$nextKeyNo)…")
+            }
+            val ok = tryFactoryAuthThenExplore(
+                aidHex = aidHex,
+                keyNo = nextKeyNo,
+                flashMessage = null,
+                fillAfter = false,
             )
             if (!ok) {
-                // déjà oubliée dans silentAuthThenExplore
+                failed += nextKeyNo
                 continue
             }
+            // Succès : flash sobre une seule fois si lecture avancée
+            if (guard == 1) {
+                showAuthSuccessFlash(DEFAULT_AUTH_OK_MESSAGE)
+            }
         }
+    }
+
+    /**
+     * Prochain slot carte utile pour progresser :
+     * - 0 si structure absente / free-list OFF sans session maître
+     * - sinon un n° R/RW d’un fichier Standard encore non lu
+     *
+     * @param preferKnown si non null, ne proposer que ces slots (phase mémorisée)
+     */
+    private fun nextSlotNeedingAuth(aidHex: String, preferKnown: Set<Int>?): Int? {
+        val explore = _ui.value.explore
+            ?.takeIf { it.aidHex.equals(aidHex, ignoreCase = true) }
+            ?: return null
+        val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+
+        fun accept(slot: Int): Boolean {
+            if (slot == sessionKey) return false
+            if (preferKnown != null && slot !in preferKnown) return false
+            return true
+        }
+
+        // Structure : free-list OFF ou absente + pas de fichiers → maître 0
+        val freeList = explore.keySettings?.bits?.freeDirectoryListWithoutMaster
+        val needsStructureAuth =
+            explore.files.isEmpty() &&
+                (freeList == false || explore.keySettings == null) &&
+                sessionKey != 0
+        if (needsStructureAuth && accept(0)) return 0
+
+        val unread = explore.files.filter { node ->
+            node.dataHex == null &&
+                node.settings.fileType == com.cardrw.desfire.model.FileType.STANDARD &&
+                !node.settings.accessRights.isReadNever &&
+                !node.settings.accessRights.isReadFree
+        }
+        if (unread.isEmpty() && !needsStructureAuth) return null
+
+        // Ordre : Read spécifique avant RW, puis plus petit n°
+        val slots = linkedSetOf<Int>()
+        for (node in unread) {
+            for (c in node.settings.accessRights.readKeyCandidates()) {
+                if (accept(c.keyNo)) slots += c.keyNo
+            }
+        }
+        if (slots.isEmpty() && needsStructureAuth && accept(0)) return 0
+        return slots.minOrNull()
+    }
+
+    /**
+     * AuthenticateAES avec matériau usine 00…00 sur [keyNo], puis explore.
+     * Succès → mémorise le slot ; échec → false (caller gère failed set).
+     */
+    private suspend fun tryFactoryAuthThenExplore(
+        aidHex: String,
+        keyNo: Int,
+        flashMessage: String?,
+        fillAfter: Boolean,
+    ): Boolean {
+        val keyBytes = AesConstants.FACTORY_KEY.copyOf()
+        _ui.update {
+            it.copy(
+                keyNo = keyNo,
+                keyHex = Hex.encode(keyBytes),
+                busy = true,
+                errorMessage = null,
+                statusLine = "Auth auto clé standard (n°$keyNo)…",
+            )
+        }
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.ensureApplicationSelected(Aid.fromHex(aidHex))
+                client.authenticateAes(keyNo, keyBytes, aidHex)
+                client.authSession
+            }
+        }
+        return result.fold(
+            onSuccess = { session ->
+                rememberAuth(aidHex, keyNo, keyBytes, vaultEntryId = null)
+                // Succès usine : retirer d’éventuels échecs antérieurs sur ce slot
+                factoryFailedSlotsByAid[aidHex.uppercase()]?.remove(keyNo)
+                _ui.update {
+                    it.copy(
+                        authSession = session,
+                        errorMessage = null,
+                        statusLine = null,
+                    )
+                }
+                syncJournal()
+                runExplore(aidHex, fillRemembered = fillAfter)
+                if (flashMessage != null) showAuthSuccessFlash(flashMessage)
+                true
+            },
+            onFailure = {
+                syncJournal()
+                _ui.update { it.copy(busy = false) }
+                false
+            },
+        )
     }
 
     /**

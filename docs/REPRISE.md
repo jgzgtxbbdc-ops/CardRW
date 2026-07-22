@@ -47,12 +47,13 @@
 - `CardUiState.exploreByAid` : cache multi-AID (reselect sans flash vide)
 - Libellés session / sheet : PICC distinct de « App 00 00 00 »
 
-**U4b — clés mémorisées multi-slots (session VM) :**
+**U4b — clés mémorisées + clé standard auto (session VM) :**
 - Auth réussie → `rememberedKeysByAid[AID][keyNo]` (plusieurs slots : 2, 3, 0…)
-- Re-select app → re-auth dernière clé + **fill auto** des fichiers encore vides avec les autres clés mémorisées
-- **Merge** : données déjà lues (ex. F0/F1 clé 2) **conservées** après auth clé 3 (plus de message rouge trompeur)
-- CTA fichier → si clé candidate mémorisée, re-auth sans sheet
-- Wipe à nouvelle carte / Relire / reset ; 0xAE → oubli **ce** slot seulement
+- Re-select app → re-auth dernière clé + **fill auto** multi-clés mémorisées
+- **Clé standard usine 00…00** tentée auto sur slots utiles (maître 0 structure, R/RW fichiers non lus)
+- **Merge** : données déjà lues conservées si session change de clé
+- CTA fichier → mémorisée **ou** usine sur candidat, sinon sheet
+- Échecs usine mémorisés par slot (pas de boucle 0xAE) ; wipe à nouvelle carte
 
 **Principes (rappel) :** (1) afficher dès que lisible (2) scroll = info, saisie = fenêtre (3) arbre DESFire (4) demander la/les clés capables de l’op.
 
