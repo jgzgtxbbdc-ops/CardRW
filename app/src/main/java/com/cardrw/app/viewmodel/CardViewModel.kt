@@ -79,6 +79,20 @@ enum class CardPhase {
     Error,
 }
 
+/**
+ * Dernière auth AES réussie pour un AID (session carte courante uniquement).
+ * Permet de re-sélectionner une app sans re-saisir le matériau (Select invalide la SM).
+ */
+data class RememberedAppAuth(
+    val keyNo: Int,
+    /** Si non null, on reprend le matériau du coffre en priorité. */
+    val vaultEntryId: String? = null,
+    /** Copie session du secret (wipe à la pose d’une nouvelle carte / reset). */
+    val keyBytes: ByteArray,
+) {
+    fun copyMaterial(): ByteArray = keyBytes.copyOf()
+}
+
 @HiltViewModel
 class CardViewModel @Inject constructor(
     private val journalRepository: ApduJournalRepository,
@@ -97,6 +111,12 @@ class CardViewModel @Inject constructor(
     private var liveIsoDep: IsoDep? = null
     private var liveClient: DesfireClient? = null
     private var liveUid: ByteArray? = null
+
+    /**
+     * Mémoire session : AID uppercase → dernière clé OK.
+     * Pas de persistance disque (labo : secret uniquement tant que la carte reste « en session » VM).
+     */
+    private val rememberedAuthByAid = mutableMapOf<String, RememberedAppAuth>()
 
     init {
         viewModelScope.launch { keyVault.load() }
@@ -267,10 +287,12 @@ class CardViewModel @Inject constructor(
                         )
                     }
                     syncJournal()
-                    if (tryDefaultAuth) {
-                        tryDefaultAuthThenExplore(aidHex)
-                    } else {
-                        runExplore(aidHex)
+                    when {
+                        tryDefaultAuth -> tryDefaultAuthThenExplore(aidHex)
+                        // Select invalide la SM : rejouer la dernière clé OK pour cet AID
+                        rememberedAuthByAid.containsKey(cacheKey) ->
+                            tryRememberedAuthThenExplore(aidHex)
+                        else -> runExplore(aidHex)
                     }
                 },
                 onFailure = { e -> handleOpFailure(e, selectedAidHex = aidHex) },
@@ -280,8 +302,8 @@ class CardViewModel @Inject constructor(
 
     /**
      * Authentifie avec la **clé par défaut labo** : slot carte n°0 + matériau usine `00…00`.
-     * Succès → [CardUiState.defaultAuthFlash] + explore.
-     * Échec → aucun message d’erreur ; explore partiel + [CardUiState.openAuthSheetNonce].
+     * Succès → flash UI + mémorisation pour re-select.
+     * Échec → si une clé était déjà mémorisée pour l’AID, la tenter ; sinon sheet auth.
      */
     private suspend fun tryDefaultAuthThenExplore(aidHex: String) {
         val keyNo = DEFAULT_AUTH_KEY_NO
@@ -305,6 +327,7 @@ class CardViewModel @Inject constructor(
         }
         result.fold(
             onSuccess = { session ->
+                rememberAuth(aidHex, keyNo, keyBytes, vaultEntryId = null)
                 _ui.update {
                     it.copy(
                         authSession = session,
@@ -317,19 +340,140 @@ class CardViewModel @Inject constructor(
                 showAuthSuccessFlash(DEFAULT_AUTH_OK_MESSAGE)
             },
             onFailure = {
-                // Silencieux : pas d’errorMessage — sheet auth standard
+                syncJournal()
+                // Usine refusée : retomber sur la clé déjà validée pour cet AID si dispo
+                if (rememberedAuthByAid.containsKey(aidHex.uppercase())) {
+                    tryRememberedAuthThenExplore(aidHex)
+                } else {
+                    _ui.update {
+                        it.copy(
+                            authSession = null,
+                            errorMessage = null,
+                            statusLine = null,
+                            openAuthSheetNonce = it.openAuthSheetNonce + 1,
+                        )
+                    }
+                    runExplore(aidHex)
+                }
+            },
+        )
+    }
+
+    /**
+     * Rejoue la dernière auth réussie pour [aidHex] (sans sheet ni re-saisie).
+     * Échec → oubli de l’entrée + explore partiel (l’utilisateur peut ré-ouvrir la sheet).
+     */
+    private suspend fun tryRememberedAuthThenExplore(aidHex: String) {
+        val remembered = rememberedAuthByAid[aidHex.uppercase()] ?: run {
+            runExplore(aidHex)
+            return
+        }
+        val keyNo = remembered.keyNo
+        val keyBytes: ByteArray = try {
+            resolveRememberedMaterial(remembered)
+        } catch (e: Exception) {
+            forgetAuth(aidHex)
+            _ui.update {
+                it.copy(
+                    busy = false,
+                    errorMessage = "Clé mémorisée indisponible : ${e.message}",
+                    statusLine = null,
+                )
+            }
+            runExplore(aidHex)
+            return
+        }
+
+        _ui.update {
+            it.copy(
+                keyNo = keyNo,
+                keyHex = Hex.encode(keyBytes),
+                busy = true,
+                errorMessage = null,
+                statusLine = "Ré-auth auto (clé n°$keyNo)…",
+            )
+        }
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.ensureApplicationSelected(Aid.fromHex(aidHex))
+                client.authenticateAes(keyNo, keyBytes, aidHex)
+                client.authSession
+            }
+        }
+        result.fold(
+            onSuccess = { session ->
+                // Rafraîchir la copie session (vault a pu changer)
+                rememberAuth(aidHex, keyNo, keyBytes, remembered.vaultEntryId)
+                _ui.update {
+                    it.copy(
+                        authSession = session,
+                        errorMessage = null,
+                        statusLine = null,
+                    )
+                }
+                syncJournal()
+                runExplore(aidHex)
+                showAuthSuccessFlash(REMEMBERED_AUTH_OK_MESSAGE)
+            },
+            onFailure = {
+                // Clé plus valide sur la carte → ne pas spammer ; oublier et laisser l’UI sans session
+                forgetAuth(aidHex)
                 syncJournal()
                 _ui.update {
                     it.copy(
                         authSession = null,
                         errorMessage = null,
-                        statusLine = null,
-                        openAuthSheetNonce = it.openAuthSheetNonce + 1,
+                        statusLine = "Clé mémorisée refusée — authentifie à nouveau.",
                     )
                 }
                 runExplore(aidHex)
             },
         )
+    }
+
+    private suspend fun resolveRememberedMaterial(remembered: RememberedAppAuth): ByteArray {
+        val vaultId = remembered.vaultEntryId
+        if (vaultId != null) {
+            return try {
+                keyVault.material(vaultId)
+            } catch (_: Exception) {
+                // Entrée coffre absente : repli sur la copie session
+                remembered.copyMaterial()
+            }
+        }
+        return remembered.copyMaterial()
+    }
+
+    private fun rememberAuth(
+        aidHex: String,
+        keyNo: Int,
+        keyBytes: ByteArray,
+        vaultEntryId: String?,
+    ) {
+        val key = aidHex.uppercase()
+        rememberedAuthByAid[key]?.keyBytes?.fill(0)
+        rememberedAuthByAid[key] = RememberedAppAuth(
+            keyNo = keyNo.coerceIn(0, 13),
+            vaultEntryId = vaultEntryId,
+            keyBytes = keyBytes.copyOf(),
+        )
+        // Prefill sheet pour un futur « Changer de clé »
+        _ui.update {
+            it.copy(
+                keyNo = keyNo.coerceIn(0, 13),
+                keyHex = Hex.encode(keyBytes),
+            )
+        }
+    }
+
+    private fun forgetAuth(aidHex: String) {
+        val removed = rememberedAuthByAid.remove(aidHex.uppercase())
+        removed?.keyBytes?.fill(0)
+    }
+
+    private fun clearRememberedAuth() {
+        rememberedAuthByAid.values.forEach { it.keyBytes.fill(0) }
+        rememberedAuthByAid.clear()
     }
 
     private fun showAuthSuccessFlash(message: String) {
@@ -408,14 +552,17 @@ class CardViewModel @Inject constructor(
             }
             result.fold(
                 onSuccess = { session ->
+                    var resolvedVaultId = vaultEntryId
                     var vaultNote: String? = null
                     if (saveAsVaultName != null && vaultEntryId == null) {
                         try {
-                            keyVault.create(saveAsVaultName, keyBytes)
+                            resolvedVaultId = keyVault.create(saveAsVaultName, keyBytes)
                         } catch (e: Exception) {
                             vaultNote = "Auth OK — coffre : ${e.message}"
                         }
                     }
+                    // Mémoriser pour re-select app sans re-saisie (session carte)
+                    rememberAuth(aidHex, resolvedKeyNo, keyBytes, resolvedVaultId)
                     _ui.update {
                         it.copy(
                             authSession = session,
@@ -551,6 +698,7 @@ class CardViewModel @Inject constructor(
     fun resetToWaiting() {
         viewModelScope.launch {
             nfcMutex.withLock { closeLive() }
+            clearRememberedAuth()
             _ui.value = CardUiState()
         }
     }
@@ -559,6 +707,7 @@ class CardViewModel @Inject constructor(
 
     private suspend fun connectAndRead(tag: Tag) {
         closeLive()
+        clearRememberedAuth()
         _ui.update {
             it.copy(
                 phase = CardPhase.Reading,
@@ -702,5 +851,7 @@ class CardViewModel @Inject constructor(
         const val DEFAULT_AUTH_OK_MESSAGE =
             "Authentification réussie avec la clé par défaut"
         const val MANUAL_AUTH_OK_MESSAGE = "Authentification réussie"
+        /** Re-select app : session restaurée sans re-saisie. */
+        const val REMEMBERED_AUTH_OK_MESSAGE = "Session restaurée (clé mémorisée)"
     }
 }

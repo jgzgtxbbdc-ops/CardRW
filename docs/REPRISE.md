@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-22 (U4 arbre moniteur PICC → apps → fichiers)  
+**Dernière mise à jour :** 2026-07-22 (U4 + re-auth auto clé mémorisée par AID)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** `defbc55` — U4 arbre moniteur PICC → apps → fichiers
+**Commit :** (voir `git log -1`) — re-auth auto session  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -18,7 +18,7 @@
 | **FACTORY_KEY** copie défensive | ✅ `51a6d52` — voir contrat ci-dessous |
 | **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
-| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0–U4 ✅** — **U5** polish suivant |
+| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0–U4b ✅** — **U5** polish suivant |
 | **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
@@ -36,6 +36,7 @@
 | **U2** | Auth en bottom sheet ; session sticky | ✅ |
 | **U3** | Clés candidates selon intention / droits | ✅ |
 | **U4** | Arbre PICC super-nœud ; fichiers sous apps | ✅ **livré** |
+| **U4b** | Re-auth auto : dernière clé OK mémorisée par AID | ✅ **livré** (session carte) |
 | **U5** | GetCardUID auto, preview hex, polish | ⬜ **prochaine** |
 
 **U4 livré :**
@@ -45,6 +46,12 @@
 - Une seule app détaillée à la fois ; apps déjà visitées = badge **Cache** + compteur
 - `CardUiState.exploreByAid` : cache multi-AID (reselect sans flash vide)
 - Libellés session / sheet : PICC distinct de « App 00 00 00 »
+
+**U4b — clé mémorisée (session VM) :**
+- Auth réussie → `rememberedAuthByAid[AID]` (keyNo + bytes + vaultId optionnel)
+- Re-select app → `AuthenticateAES` auto puis explore (pas de re-saisie)
+- Flash : « Session restaurée (clé mémorisée) »
+- Wipe à nouvelle carte / Relire / reset ; échec 0xAE → oubli entrée + message soft
 
 **Principes (rappel) :** (1) afficher dès que lisible (2) scroll = info, saisie = fenêtre (3) arbre DESFire (4) demander la/les clés capables de l’op.
 
