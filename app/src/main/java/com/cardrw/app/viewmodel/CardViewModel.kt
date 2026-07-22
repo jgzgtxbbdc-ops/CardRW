@@ -124,7 +124,10 @@ class CardViewModel @Inject constructor(
         }
     }
 
-    /** Marque l’AID et exécute SelectApplication si le tag est présent. */
+    /**
+     * SelectApplication puis **pull auto** du directory (U1 / moniteur diagnostic).
+     * L’auth est invalidée par le select côté client.
+     */
     fun selectApplication(aidHex: String) {
         viewModelScope.launch {
             _ui.update {
@@ -134,7 +137,7 @@ class CardViewModel @Inject constructor(
                     authSession = null,
                     errorMessage = null,
                     busy = true,
-                    statusLine = null,
+                    statusLine = "SelectApplication…",
                 )
             }
             val result = withContext(Dispatchers.IO) {
@@ -148,19 +151,22 @@ class CardViewModel @Inject constructor(
                 onSuccess = {
                     _ui.update {
                         it.copy(
-                            busy = false,
                             authSession = null,
-                            statusLine = null,
                             errorMessage = null,
+                            // busy reste true : enchaîne explore
                         )
                     }
                     syncJournal()
+                    runExplore(aidHex)
                 },
                 onFailure = { e -> handleOpFailure(e, selectedAidHex = aidHex) },
             )
         }
     }
 
+    /**
+     * AuthenticateAES puis **re-pull auto** (structure / données selon session).
+     */
     fun authenticate() {
         val aidHex = _ui.value.selectedAidHex
         if (aidHex == null) {
@@ -190,25 +196,36 @@ class CardViewModel @Inject constructor(
                 onSuccess = { session ->
                     _ui.update {
                         it.copy(
-                            busy = false,
                             authSession = session,
-                            statusLine = null,
                             errorMessage = null,
+                            // busy reste true : enchaîne explore
                         )
                     }
                     syncJournal()
+                    runExplore(aidHex)
                 },
                 onFailure = { e -> handleOpFailure(e) },
             )
         }
     }
 
+    /** Actualiser manuellement le directory de l’AID sélectionné (U1 : plus la porte d’entrée). */
     fun explore() {
         val aidHex = _ui.value.selectedAidHex
         if (aidHex == null) {
             _ui.update { it.copy(errorMessage = "Sélectionne d’abord une application (ou PICC).") }
             return
         }
+        viewModelScope.launch {
+            runExplore(aidHex)
+        }
+    }
+
+    /**
+     * GetKeySettings / FileIDs / FileSettings / ReadData selon droits de session.
+     * Appelé après select, après auth, ou via [explore] (Actualiser).
+     */
+    private suspend fun runExplore(aidHex: String) {
         // Cache structure du même AID (workflow clé 0 structure → clé lecture données)
         val prev = _ui.value.explore
         val cachedSettings =
@@ -218,64 +235,62 @@ class CardViewModel @Inject constructor(
                 null
             }
 
-        viewModelScope.launch {
-            val keyNo = _ui.value.authSession?.keyNumber
-            val modeHint = when {
-                keyNo != null && keyNo != 0 && cachedSettings != null -> "Lecture (cache structure)…"
-                keyNo != null && keyNo != 0 -> "Exploration (clé non-maître)…"
-                else -> "Exploration…"
-            }
-            _ui.update {
-                it.copy(busy = true, errorMessage = null, statusLine = modeHint)
-            }
-            val result = withContext(Dispatchers.IO) {
-                withLiveClient { client ->
-                    client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                    val exploreResult = client.exploreSelectedApplication(
-                        aid = Aid.fromHex(aidHex),
-                        readStandardFiles = true,
-                        cachedFileSettings = cachedSettings,
-                    )
-                    // Fusionner key settings du cache si mode lecture seule
-                    val merged = if (exploreResult.structureFromCache &&
-                        exploreResult.keySettings == null &&
-                        prev?.keySettings != null &&
-                        prev.aidHex.equals(aidHex, ignoreCase = true)
-                    ) {
-                        exploreResult.copy(keySettings = prev.keySettings)
-                    } else {
-                        exploreResult
-                    }
-                    merged to client.authSession
-                }
-            }
-            result.fold(
-                onSuccess = { (exploreResult, session) ->
-                    val fileCount = exploreResult.files.size
-                    val readable = exploreResult.files.count { it.dataHex != null }
-                    val summary = when {
-                        Aid.fromHex(aidHex).isPicc -> "PICC : key settings (pas de fichiers ici)"
-                        exploreResult.structureFromCache && readable > 0 ->
-                            "Lecture : $readable fichier(s) lu(s) (structure en cache)"
-                        exploreResult.structureFromCache ->
-                            "Structure en cache — $fileCount fichier(s), 0 lu (droits / session)"
-                        fileCount == 0 -> "Exploration : aucun fichier listé"
-                        else -> "Exploration : $fileCount fichier(s) · $readable lu(s)"
-                    }
-                    _ui.update {
-                        it.copy(
-                            busy = false,
-                            explore = exploreResult,
-                            authSession = session,
-                            statusLine = summary,
-                            errorMessage = null,
-                        )
-                    }
-                    syncJournal()
-                },
-                onFailure = { e -> handleOpFailure(e) },
-            )
+        val keyNo = _ui.value.authSession?.keyNumber
+        val modeHint = when {
+            keyNo != null && keyNo != 0 && cachedSettings != null -> "Lecture (cache structure)…"
+            keyNo != null && keyNo != 0 -> "Exploration (clé non-maître)…"
+            else -> "Exploration…"
         }
+        _ui.update {
+            it.copy(busy = true, errorMessage = null, statusLine = modeHint)
+        }
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.ensureApplicationSelected(Aid.fromHex(aidHex))
+                val exploreResult = client.exploreSelectedApplication(
+                    aid = Aid.fromHex(aidHex),
+                    readStandardFiles = true,
+                    cachedFileSettings = cachedSettings,
+                )
+                // Fusionner key settings du cache si mode lecture seule
+                val merged = if (exploreResult.structureFromCache &&
+                    exploreResult.keySettings == null &&
+                    prev?.keySettings != null &&
+                    prev.aidHex.equals(aidHex, ignoreCase = true)
+                ) {
+                    exploreResult.copy(keySettings = prev.keySettings)
+                } else {
+                    exploreResult
+                }
+                merged to client.authSession
+            }
+        }
+        result.fold(
+            onSuccess = { (exploreResult, session) ->
+                val fileCount = exploreResult.files.size
+                val readable = exploreResult.files.count { it.dataHex != null }
+                val summary = when {
+                    Aid.fromHex(aidHex).isPicc -> "PICC : key settings (pas de fichiers ici)"
+                    exploreResult.structureFromCache && readable > 0 ->
+                        "Lecture : $readable fichier(s) lu(s) (structure en cache)"
+                    exploreResult.structureFromCache ->
+                        "Structure en cache — $fileCount fichier(s), 0 lu (droits / session)"
+                    fileCount == 0 -> "Exploration : aucun fichier listé"
+                    else -> "Exploration : $fileCount fichier(s) · $readable lu(s)"
+                }
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        explore = exploreResult,
+                        authSession = session,
+                        statusLine = summary,
+                        errorMessage = null,
+                    )
+                }
+                syncJournal()
+            },
+            onFailure = { e -> handleOpFailure(e) },
+        )
     }
 
     /** GetCardUID après auth — utile si Random ID. */

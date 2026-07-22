@@ -166,7 +166,7 @@ Option labo opt-in éventuelle : hors scope U1–U4.
 | ID | Contenu | Critère « done » | Risque |
 |----|---------|------------------|--------|
 | **U0** | Cette spec + REPRISE + renvoi CDC | Docs mergees | Nul |
-| **U1** | Pull auto post-select et post-auth ; bouton → « Actualiser » | Select app sans second clic montre directory / erreurs ; auth enchaîne refresh | Faible |
+| **U1** | Pull auto post-select et post-auth ; bouton → « Actualiser » | ✅ 2026-07-22 — select/auth → `runExplore` ; CTA Actualiser | Faible |
 | **U2** | Auth en bottom sheet ; panneau retiré du scroll ; barre session | Saisie clé sans scroller le moniteur pour « trouver Auth » | Moyen |
 | **U3** | `keysFor(intent)` ; candidates ; Free/Never ; CTA nœud | Sheet propose les n° utiles quand settings connus | Moyen |
 | **U4** | Arbre PICC super-nœud ; fichiers sous apps ; style plein/pointillé | Plus de PICC « comme une app » ; fichiers imbriqués | Élevé |

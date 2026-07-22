@@ -224,23 +224,13 @@ private fun ReadyContent(
             onAuth = viewModel::authenticate,
         )
 
-        // Explore = CTA principal une fois auth (ou secondary si pas encore)
-        if (authenticated) {
-            Button(
-                onClick = { viewModel.explore() },
-                enabled = !ui.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                BusyLabel(busy = ui.busy, text = stringResource(R.string.card_action_explore))
-            }
-        } else {
-            OutlinedButton(
-                onClick = { viewModel.explore() },
-                enabled = !ui.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                BusyLabel(busy = ui.busy, text = stringResource(R.string.card_action_explore))
-            }
+        // U1 : pull auto après select/auth — bouton = Actualiser (pas la porte d’entrée)
+        OutlinedButton(
+            onClick = { viewModel.explore() },
+            enabled = !ui.busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            BusyLabel(busy = ui.busy, text = stringResource(R.string.card_action_refresh))
         }
         Text(
             text = if (isPicc) {

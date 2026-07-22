@@ -103,7 +103,7 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] `FACTORY_KEY` copie défensive + `prepareCommand(clearHeaderLength)` (`51a6d52`)
 - [ ] Enrichir golden avec capture auth + ReadData FULL
 - [x] **v0.6 U0** — spec moniteur Carte `docs/UX_ECRAN_CARTE.md` (2026-07-22)
-- [ ] **v0.6 U1** — pull auto post-select / post-auth
+- [x] **v0.6 U1** — pull auto post-select / post-auth ; Actualiser (2026-07-22)
 - [ ] **v0.6 U2–U5** — sheet auth, clés candidates, arbre PICC, polish (voir spec)
 - [x] **Coffre K0** — spec `docs/UX_COFFRE_CLES.md` (2026-07-22)
 - [ ] **Coffre K1–K2** — persistance + dropdown/save à l’auth (après U2 de préférence)

@@ -28,7 +28,7 @@
     <string name="card_type">Type</string>
     <string name="card_memory">Mémoire</string>
     <string name="card_apps">Applications (%1$d)</string>
-    <string name="card_apps_hint">Tap = SelectApplication (carte sur l’antenne).</string>
+    <string name="card_apps_hint">Tap = SelectApplication + lecture auto du directory (carte sur l’antenne).</string>
     <string name="card_no_apps">Aucune application (carte vide)</string>
     <string name="card_error">Erreur de lecture</string>
     <string name="card_raw_fields">Détail technique GetVersion</string>
@@ -39,9 +39,9 @@
     <string name="card_notes">Notes</string>
     <string name="card_app_selected_badge">Sélectionnée</string>
     <string name="card_selected_app">Marquée : %1$s</string>
-    <string name="card_action_explore">Explorer (lecture)</string>
-    <string name="card_explore_hint_picc">PICC : key settings uniquement (pas de fichiers ici)</string>
-    <string name="card_explore_hint_app">Key settings · fichiers · ReadData Standard</string>
+    <string name="card_action_refresh">Actualiser</string>
+    <string name="card_explore_hint_picc">PICC : key settings auto après select · Actualiser pour relire</string>
+    <string name="card_explore_hint_app">Directory lu auto après select / auth · Actualiser pour relire</string>
     <string name="card_reread">Relire une carte</string>
     <string name="card_tag_lost">Carte perdue — ne pas retirer pendant une opération.</string>
     <string name="card_keep_on_antenna">Garde la carte posée pour auth et exploration.</string>
