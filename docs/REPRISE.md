@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-21  
-**Machine d’arrêt :** iMac (push GitHub OK)  
+**Dernière mise à jour :** 2026-07-22  
+**Machine d’arrêt :** (session design UX)  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** `51a6d52` — `security+sm-api: FACTORY_KEY copy + prepareCommand clear headers`  
+**Commit :** voir `git log -1` (U0 docs UX attendu sur `main`)  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -18,9 +18,24 @@
 | **FACTORY_KEY** copie défensive | ✅ `51a6d52` — voir contrat ci-dessous |
 | **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
-| Passe UX (UI peu pratique) | ⬜ pas commencée |
+| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0 spec ✅** — code U1→U5 à faire |
 | Décision EV2 avant écritures massives | ⬜ à trancher (parc cartes) |
-| **v1** Write / Create / ChangeKey / dumps | ⬜ suivant majeur |
+| **v1** Write / Create / ChangeKey / dumps | ⬜ après U1+ (idéal U2–U3) |
+
+### v0.6 UX — moniteur Carte
+
+**Spec :** [`docs/UX_ECRAN_CARTE.md`](UX_ECRAN_CARTE.md) (source de vérité)
+
+| Tranche | Contenu | État |
+|---|---|---|
+| **U0** | Spec 4 principes + découpage | ✅ |
+| **U1** | Pull auto post-select / post-auth ; Explorer → Actualiser | ⬜ **prochaine** |
+| **U2** | Auth en bottom sheet ; session sticky | ⬜ |
+| **U3** | Clés candidates selon intention / droits | ⬜ |
+| **U4** | Arbre PICC super-nœud ; fichiers sous apps | ⬜ |
+| **U5** | GetCardUID auto, preview hex, polish | ⬜ |
+
+**Principes (rappel) :** (1) afficher dès que lisible (2) scroll = info, saisie = fenêtre (3) arbre DESFire (4) demander la/les clés capables de l’op.
 
 ### Contrat crypto déjà livré (ne pas refaire)
 
@@ -85,6 +100,7 @@ git pull origin main
 **Docs utiles :**
 
 - CDC : `docs/cahier-des-charges-desfire-ev3.md`  
+- **UX Carte (v0.6) :** `docs/UX_ECRAN_CARTE.md`  
 - Labo : `docs/NOTES_LABO.md`  
 - Commandes : `docs/ANNEXE_A_COMMANDES.md`  
 - Cette note : `docs/REPRISE.md`
@@ -96,20 +112,21 @@ git pull origin main
 ```text
 Projet CardRW — reprise
 Repo : (chemin local) — origin jgzgtxbbdc-ops/CardRW
-git log -1  # attendu ≥ 51a6d52
+git log -1
 CDC : docs/cahier-des-charges-desfire-ev3.md
+UX Carte : docs/UX_ECRAN_CARTE.md   ← source de vérité moniteur v0.6
 NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
-  FACTORY_KEY (copie défensive) + prepareCommand(clearHeaderLength) dans 51a6d52
-  Tests FactoryKeyTest + Ev1SessionPrepareCommandTest verts
+  FACTORY_KEY + prepareCommand(clearHeaderLength) livrés (51a6d52)
+  v0.6 UX : U0 spec ✅ ; code U1→U5 à faire
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
-Hors scope immédiat : refaire v0, refaire FACTORY_KEY/prepareCommand, relire tout le CDC
+Hors scope immédiat : refaire v0/crypto livré, relire tout le CDC, U4 arbre avant U1
 
-Prochaine tâche (choisir une) :
-  A) Passe UX courte sur flux Carte/Auth/Explore (douleurs utilisateur)
-  B) Arbitrage CDC : SM EV2 avant Write ou Write EV1 d’abord (selon parc)
-  C) v1 WriteData Standard (clearHeaderLength=7) + tests + terrain
+Prochaine tâche (une seule par session) :
+  A) U1 pull auto post-select/auth (docs/UX_ECRAN_CARTE.md) — recommandé
+  B) Arbitrage SM EV2 avant Write (parc cartes)
+  C) v1 WriteData Standard — seulement si urgence ; sinon après U1+
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -118,13 +135,14 @@ Ne pas committer clés prod / dumps réels / local.properties
 ## Ordre de bataille recommandé (prochaine fois)
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
-2. **Une** des pistes (ne pas tout mélanger dans la même session) :
-   - **A — UX** : hiérarchie CTA, auth lisible, explorateur dense, moins de friction labo.  
-   - **B — EV2** : tester si des cartes refusent AES EV1 (`0xAA`) → décider v0.6 auth EV2 avant writes.  
-   - **C — v1 Write** : s’appuyer sur le nouveau `prepareCommand` ; carte sacrifiable ; journal APDU.  
-3. Fin de session : `git status` → commit clair → **`git push`**.
+2. **Une** des pistes (ne pas tout mélanger) :
+   - **A — U1** : `selectApplication` / `authenticate` enchaînent explore ; string Actualiser ; terrain.  
+     Puis U2 sheet → U3 candidates → U4 arbre (voir `UX_ECRAN_CARTE.md`).  
+   - **B — EV2** : tester refus AES EV1 (`0xAA`) → décider avant writes massifs.  
+   - **C — v1 Write** : `prepareCommand` header=7 ; carte sacrifiable — **après U1** si possible.  
+3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : **A ou B avant un gros C**, sauf urgence d’écrire des badges.
+Avis fil rouge : **U1 (puis U2–U3) avant un gros C** ; ne pas commencer l’arbre U4 sans pull auto.
 
 ---
 

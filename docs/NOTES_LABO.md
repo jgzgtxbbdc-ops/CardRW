@@ -102,8 +102,10 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] Git + remote privé `jgzgtxbbdc-ops/CardRW`
 - [x] `FACTORY_KEY` copie défensive + `prepareCommand(clearHeaderLength)` (`51a6d52`)
 - [ ] Enrichir golden avec capture auth + ReadData FULL
-- [ ] Passe UX flux lecture/auth
+- [x] **v0.6 U0** — spec moniteur Carte `docs/UX_ECRAN_CARTE.md` (2026-07-22)
+- [ ] **v0.6 U1** — pull auto post-select / post-auth
+- [ ] **v0.6 U2–U5** — sheet auth, clés candidates, arbre PICC, polish (voir spec)
 - [ ] Arbitrage EV2 avant writes
 - [ ] v1 : write / create / ChangeKey / dumps (WriteData header=7, ChangeKey header=1)
 
-Voir aussi `docs/REPRISE.md` pour la reprise multi-machine.
+Voir aussi `docs/REPRISE.md` pour la reprise multi-machine et `docs/UX_ECRAN_CARTE.md` pour l’UX Carte.

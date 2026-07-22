@@ -2,7 +2,7 @@
 
 **Nom commercial :** CardRW  
 **applicationId :** `com.cardrw.app`  
-**Version document :** 1.2 — 21 juillet 2026  
+**Version document :** 1.3 — 22 juillet 2026  
 **Statut :** document de travail — arbitrages §12 clos ✅  
 **Historique :**
 
@@ -11,6 +11,7 @@
 | 1.0 | 2026-07-21 | Version initiale validée sur les décisions ✅ |
 | 1.1 | 2026-07-21 | Protocole DESFire explicite, découpage releases, sécurité locale des secrets, robustesse NFC terrain, NFR, presets détaillés |
 | 1.2 | 2026-07-21 | Arbitrages : nom CardRW, open source différé, SecretStore, `{{uid}}`, idempotence hybride, labo cartes |
+| 1.3 | 2026-07-22 | §7 : principes moniteur diagnostic écran Carte + renvoi `docs/UX_ECRAN_CARTE.md` (v0.6) |
 
 ---
 
@@ -221,23 +222,39 @@ Accueil
 
 Bascule **Débutant / Expert** (globale) : plus ou moins de prose pédagogique, même puissance fonctionnelle.
 
+### 7.0 Écran Carte — moniteur diagnostic (v0.6) 🆕
+
+L’écran **Carte** en lecture est un **moniteur** aligné sur le modèle DESFire, pas un pipeline de formulaires.
+
+**Principes (détail et tranches U1–U5 : [`docs/UX_ECRAN_CARTE.md`](UX_ECRAN_CARTE.md)) :**
+
+1. **Diagnostic** — afficher dès qu’une info est lisible (select/auth → pull auto ; pas de CTA pour « révéler »).  
+2. **Scroll = info** — saisie / confirmation (clé, ops à risque) en surface secondaire ; le moniteur garde le contexte.  
+3. **Arborescence** — PICC = super-nœud racine ; applications en dessous ; fichiers **dans** leur app (pas liste plate).  
+4. **Clés pertinentes** — si une op exige une clé, proposer la ou les clés **capables** (droits R/W/RW/Ch, maître, Free/Never), pas un choix 0–13 indifférencié.
+
+**Écart v0.5 :** capacités protocole OK (auth, SM EV1, explore, ReadData) ; comportement moniteur = jalon **v0.6 UX**.
+
 ### 7.1 Parcours « Carte » (wizard)
 
 ```
 Approche la carte → Profil détecté (UID/Random, type, mémoire, SM dispo)
-  → Choisir une action :
-      Explorer | Créer une application | Gérer les clés | Formater | …
+  → Moniteur arborescent (lecture / état) — voir §7.0
+  → Choisir une action d’écriture / admin (v1+) :
+      Créer une application | Gérer les clés | Formater | …
   → Assistant en 3–4 écrans avec explications contextuelles
   → Récapitulatif → Exécution → Résultat + journal APDU
 ```
 
 ### 7.2 Explorateur arborescent
 
-Arbre repliable : PICC → Applications → Fichiers.  
+Arbre repliable : **PICC (racine)** → Applications → Fichiers (imbriqués sous l’app).  
+PICC n’est **pas** présentée comme une application parmi d’autres.  
 Tap sur un nœud = détail + actions contextuelles (lire, écrire, modifier droits, supprimer).  
-Affichage des **comm modes** et droits (Free/Never inclus).  
+Affichage des **comm modes** et droits (Free/Never inclus) ; style plein / pointillé selon accessibilité.  
 Bouton « + » pour créer app/fichier (selon release).  
-C’est la vue « je comprends ce qu’il y a sur ma carte ».
+C’est la vue « je comprends ce qu’il y a sur ma carte ».  
+Comportement moniteur (auto-pull, sheets, clés candidates) : **`docs/UX_ECRAN_CARTE.md`**.
 
 ### 7.3 Écran « Anneau de clés » (par application)
 
@@ -626,11 +643,19 @@ Les valeurs exactes (AID, tailles) sont finalisées à l’implémentation et ve
 
 - Auth AES + **SM EV1**  
 - Session auth visible dans l’UI  
-- Explorateur arborescent **lecture**  
+- Explorateur **lecture** (capacités ; UI moniteur arbre = v0.6)  
 - Lecture fichiers Standard (plain / mac / full selon support atteint)  
 - Gestion basique des timeouts / tag lost  
 
 **Critère de done :** lecture authentifiée de fichiers Standard sur carte de labo avec clés connues.
+
+### v0.6 — UX moniteur diagnostic (écran Carte) 🆕
+
+- Quatre principes §7.0 ; spec `docs/UX_ECRAN_CARTE.md`  
+- Pull auto post-select / post-auth ; auth en surface secondaire  
+- Clés candidates selon intention ; arbre PICC → apps → fichiers  
+
+**Critère de done :** checklist terrain §9 de `UX_ECRAN_CARTE.md` (select sans Explorer obligatoire, sheet auth, PICC racine, candidats de clé).
 
 ### v1 — Outil d’atelier utile (sans usine à templates)
 
