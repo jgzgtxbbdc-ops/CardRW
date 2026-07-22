@@ -87,12 +87,19 @@ enum class DesfireCommand(
     ),
 
     // --- Auth / SM ---
+    AUTHENTICATE_DES(
+        0x0A,
+        "AuthenticateDES",
+        SmRequirement.NONE,
+        "v0.6",
+        "Auth DES/2KTDEA legacy (PICC master usine carte vierge).",
+    ),
     AUTHENTICATE_AES(
         0xAA,
         "AuthenticateAES",
         SmRequirement.NONE,
         "v0.5",
-        "Auth AES legacy (flux EV1) → SM EV1.",
+        "Auth AES legacy (flux EV1) → SM EV1. Échoue si PICC encore en DES usine.",
     ),
     AUTHENTICATE_EV2_FIRST(
         0x71,

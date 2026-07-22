@@ -110,6 +110,7 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **Coffre K0** — spec `docs/UX_COFFRE_CLES.md` (2026-07-22)
 - [x] **Coffre K1–K2** — EncryptedPrefs + écran + sheet dropdown/save (2026-07-22)
 - [x] **EV2 code** — AuthenticateEV2First + SM EV2 + fallback EV1→EV2 (`docs/ARBITRAGE_EV2.md`, 2026-07-22)
+- [x] **DES usine PICC** — AuthenticateDES `0x0A` 2KTDEA 00…00 (carte vierge NXP ; AES échoue = normal)
 - [ ] Campagne parc EV2 (checklist §6 ARBITRAGE_EV2)
 - [ ] v1 : write / create / ChangeKey / dumps (WriteData header=7, ChangeKey header=1)
 

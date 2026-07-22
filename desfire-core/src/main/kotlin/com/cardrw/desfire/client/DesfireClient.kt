@@ -3,6 +3,8 @@ package com.cardrw.desfire.client
 import com.cardrw.desfire.command.DesfireCommand
 import com.cardrw.desfire.crypto.AesCbc
 import com.cardrw.desfire.crypto.AesConstants
+import com.cardrw.desfire.crypto.DesCipher
+import com.cardrw.desfire.crypto.DesConstants
 import com.cardrw.desfire.framing.DesfireResponse
 import com.cardrw.desfire.framing.NativeFraming
 import com.cardrw.desfire.log.ApduDirection
@@ -19,6 +21,7 @@ import com.cardrw.desfire.model.KeySettingsInfo
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.model.VersionInfo
 import com.cardrw.desfire.session.AuthSession
+import com.cardrw.desfire.session.DesLegacySession
 import com.cardrw.desfire.session.DesfireSecureSession
 import com.cardrw.desfire.session.Ev1Session
 import com.cardrw.desfire.session.Ev2Session
@@ -279,7 +282,8 @@ class DesfireClient(
         val step1 = exchange(DesfireCommand.AUTHENTICATE_AES, byteArrayOf(keyNo.toByte()))
         if (!step1.isAdditionalFrame) {
             throw DesfireProtocolException(
-                "AuthenticateAES failed: ${step1.status.shortName} — ${step1.status.pedagogicalFr}",
+                "AuthenticateAES failed: ${step1.status.shortName} — ${step1.status.pedagogicalFr}" +
+                    factoryDesHint(step1),
                 step1,
             )
         }
@@ -305,7 +309,8 @@ class DesfireClient(
         val step2 = exchange(DesfireCommand.ADDITIONAL_FRAME, token)
         if (!step2.isSuccess) {
             throw DesfireProtocolException(
-                "AuthenticateAES (challenge) failed: ${step2.status.shortName} — ${step2.status.pedagogicalFr}",
+                "AuthenticateAES (challenge) failed: ${step2.status.shortName} — ${step2.status.pedagogicalFr}" +
+                    factoryDesHint(step2),
                 step2,
             )
         }
@@ -321,13 +326,93 @@ class DesfireClient(
         val expected = AesCbc.rotateLeft(hostRndA)
         if (!rndAPrime.contentEquals(expected)) {
             throw DesfireProtocolException(
-                "AuthenticateAES: RndA' ne correspond pas — clé incorrecte ou carte non AES.",
+                "AuthenticateAES: RndA' ne correspond pas — clé incorrecte ou carte non AES." +
+                    " Sur PICC vierge usine, la master key est souvent encore en DES (0x0A), pas AES.",
             )
         }
 
         val newSession = Ev1Session.create(aidHex, keyNo, hostRndA, rndB)
         session = newSession
         return newSession
+    }
+
+    /**
+     * AuthenticateDES / 2KTDEA (0x0A) — PICC master **usine carte vierge**.
+     *
+     * @param key 8 o (DES) ou 16 o (2KTDEA, défaut usine 00…00)
+     */
+    fun authenticateDes(
+        keyNo: Int,
+        key: ByteArray = DesConstants.FACTORY_2KTDEA_KEY,
+        aidHex: String = session?.aidHex ?: "000000",
+        rndA: ByteArray? = null,
+    ): DesLegacySession {
+        require(key.size == 8 || key.size == 16) {
+            "Clé DES/2KTDEA : 8 ou 16 octets, got ${key.size}"
+        }
+        require(keyNo in 0..13) { "keyNo hors plage 0–13: $keyNo" }
+
+        session = null
+        val iv = DesCipher.zeroIv()
+        val block = DesCipher.BLOCK
+
+        // 1) 0A + keyNo → ek(RndB) 8 o + AF
+        val step1 = exchange(DesfireCommand.AUTHENTICATE_DES, byteArrayOf(keyNo.toByte()))
+        if (!step1.isAdditionalFrame) {
+            throw DesfireProtocolException(
+                "AuthenticateDES failed: ${step1.status.shortName} — ${step1.status.pedagogicalFr}",
+                step1,
+            )
+        }
+        if (step1.data.size != block) {
+            throw DesfireProtocolException(
+                "AuthenticateDES: ek(RndB) attendu $block o, got ${step1.data.size}",
+                step1,
+            )
+        }
+        val rndB = step1.data.copyOf()
+        DesCipher.cbcReceive(key, iv, rndB)
+
+        val hostRndA = rndA?.also {
+            require(it.size == block) { "RndA DES doit faire $block octets" }
+        } ?: ByteArray(block).also { random.nextBytes(it) }
+
+        val rndBRot = DesCipher.rotateLeft(rndB)
+        val token = hostRndA + rndBRot
+        DesCipher.cbcSend(key, iv, token)
+
+        // 2) AF + ek(RndA||RndB') → ek(RndA') + 00
+        val step2 = exchange(DesfireCommand.ADDITIONAL_FRAME, token)
+        if (!step2.isSuccess) {
+            throw DesfireProtocolException(
+                "AuthenticateDES (challenge) failed: ${step2.status.shortName} — ${step2.status.pedagogicalFr}",
+                step2,
+            )
+        }
+        if (step2.data.size != block) {
+            throw DesfireProtocolException(
+                "AuthenticateDES: ek(RndA') attendu $block o, got ${step2.data.size}",
+                step2,
+            )
+        }
+        val rndAPrime = step2.data.copyOf()
+        DesCipher.cbcReceive(key, iv, rndAPrime)
+        val expected = DesCipher.rotateLeft(hostRndA)
+        if (!rndAPrime.contentEquals(expected)) {
+            throw DesfireProtocolException(
+                "AuthenticateDES: RndA' ne correspond pas — clé DES incorrecte.",
+            )
+        }
+
+        val newSession = DesLegacySession(aidHex, keyNo, key.copyOf())
+        session = newSession
+        return newSession
+    }
+
+    private fun factoryDesHint(response: DesfireResponse): String {
+        if (response.status != DesfireStatus.AUTHENTICATION_ERROR) return ""
+        return " — PICC vierge usine : master key souvent encore en DES (pas AES). " +
+            "L’app retente AuthenticateDES (0x0A) avec clé usine 00…00."
     }
 
     /**
@@ -421,10 +506,11 @@ class DesfireClient(
     }
 
     /**
-     * Auth AES : tente **EV1 (0xAA)** puis **EV2 First (0x71)** si EV1 est refusé
-     * par la carte (parc EV2-only / EV3 « propre »).
-     *
-     * @return session EV1 ou EV2
+     * Auth labo moniteur :
+     * 1) **EV1 AES** `0xAA`
+     * 2) si méthode refusée → **EV2** `0x71`
+     * 3) si clé usine 00…00 et échec AES (0xAE typique) → **DES usine** `0x0A`
+     *    (PICC master carte **vierge** NXP)
      */
     fun authenticateAesPreferEv1(
         keyNo: Int,
@@ -432,12 +518,40 @@ class DesfireClient(
         aidHex: String = session?.aidHex ?: "000000",
         rndA: ByteArray? = null,
     ): DesfireSecureSession {
-        return try {
-            authenticateAes(keyNo, key, aidHex, rndA)
+        try {
+            return authenticateAes(keyNo, key, aidHex, rndA)
         } catch (e: DesfireProtocolException) {
-            if (!shouldFallbackToEv2(e)) throw e
-            authenticateEv2First(keyNo, key, aidHex, rndA)
+            if (shouldFallbackToEv2(e)) {
+                try {
+                    return authenticateEv2First(keyNo, key, aidHex, rndA)
+                } catch (_: DesfireProtocolException) {
+                    // enchaîne DES usine si pertinent
+                }
+            }
+            if (isAllZeroKey(key) && shouldFallbackToDesFactory(e)) {
+                return authenticateDes(
+                    keyNo = keyNo,
+                    key = DesConstants.FACTORY_2KTDEA_KEY,
+                    aidHex = aidHex,
+                    // RndA DES = 8 o : dériver des 8 premiers du rndA AES optionnel
+                    rndA = rndA?.copyOf(DesCipher.BLOCK),
+                )
+            }
+            throw e
         }
+    }
+
+    private fun isAllZeroKey(key: ByteArray): Boolean = key.all { it == 0.toByte() }
+
+    /** 0xAE / échec challenge AES → tenter DES usine (carte blank). */
+    private fun shouldFallbackToDesFactory(e: DesfireProtocolException): Boolean {
+        val st = e.response?.status
+        val msg = e.message.orEmpty()
+        return st == DesfireStatus.AUTHENTICATION_ERROR ||
+            msg.contains("Authentication error", ignoreCase = true) ||
+            msg.contains("RndA'", ignoreCase = true) ||
+            msg.contains("non AES", ignoreCase = true) ||
+            msg.contains("0xAE", ignoreCase = true)
     }
 
     /**
@@ -878,6 +992,9 @@ class DesfireClient(
                 } else {
                     "SelectApplication (${Hex.encode(data.copyOf(minOf(3, data.size)))})"
                 }
+            DesfireCommand.AUTHENTICATE_DES ->
+                if (data.isNotEmpty()) "AuthenticateDES (clé n°${data[0].toInt() and 0xFF})"
+                else "AuthenticateDES"
             DesfireCommand.AUTHENTICATE_AES ->
                 if (data.isNotEmpty()) "AuthenticateAES (clé n°${data[0].toInt() and 0xFF})"
                 else "AuthenticateAES"
@@ -904,6 +1021,7 @@ class DesfireClient(
         val size = response.data.size
         val sizePart = if (size > 0) " · ${size} o" else ""
         val authPart = when (session?.smLevel) {
+            com.cardrw.desfire.crypto.SecureMessagingLevel.DES_LEGACY -> " · DES"
             com.cardrw.desfire.crypto.SecureMessagingLevel.EV1 -> " · SM EV1"
             com.cardrw.desfire.crypto.SecureMessagingLevel.EV2 -> " · SM EV2"
             else -> ""

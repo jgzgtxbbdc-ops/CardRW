@@ -16,6 +16,12 @@
 Certaines cartes **EV3 « propres »** / politiques EV2-only **refusent** `0xAA` (`0x1C` illegal command, parfois permission).  
 Le parc labo actuel (apps `B0…B6 13 F5`) répond à **EV1** — logs APDU session U4/U5.
 
+### PICC carte **vierge usine** (important)
+
+Les DESFire **neuves** ont la **PICC Master Key en DES / 2KTDEA** (souvent 16×`0x00`), **pas en AES**.  
+`AuthenticateAES (0xAA)` → `0xAE` est **normal** sur blank.  
+CardRW enchaîne alors `AuthenticateDES (0x0A)` avec clé usine 00…00 → badge `Auth DES · legacy`.
+
 ---
 
 ## 2. Comportement app (depuis ce jalon)
