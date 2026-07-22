@@ -88,6 +88,7 @@ import com.cardrw.desfire.model.VersionInfo
 import com.cardrw.desfire.session.AuthSession
 import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.util.Hex
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -190,6 +191,24 @@ private fun ReadyMonitor(
     var authPlan by remember { mutableStateOf<AuthKeyPlan?>(null) }
     var neverMessage by remember { mutableStateOf<String?>(null) }
     var closeSheetWhenAuthSettles by remember { mutableStateOf(false) }
+    // U5 : conserver / restaurer la position de scroll après auth / explore
+    val monitorScroll = rememberScrollState()
+    var savedScrollPx by rememberSaveable { mutableIntStateOf(0) }
+
+    LaunchedEffect(ui.busy) {
+        if (ui.busy) {
+            savedScrollPx = monitorScroll.value
+        }
+    }
+    LaunchedEffect(ui.busy, ui.authSuccessFlash, ui.statusLine) {
+        if (!ui.busy && savedScrollPx > 0) {
+            delay(48)
+            val target = savedScrollPx.coerceAtMost(monitorScroll.maxValue)
+            if (kotlin.math.abs(monitorScroll.value - target) > 8) {
+                monitorScroll.scrollTo(target)
+            }
+        }
+    }
 
     fun openAuthSheet(plan: AuthKeyPlan, forceGenericIfNone: Boolean = false) {
         neverMessage = null
@@ -294,7 +313,7 @@ private fun ReadyMonitor(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(monitorScroll)
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -304,7 +323,13 @@ private fun ReadyMonitor(
                 realUidHex = ui.realUidHex,
             )
 
+            // U5 : GetCardUID auto après auth ; bouton secours si Random encore sans UID réel
             if (authenticated && identity.uidKind == UidKind.RANDOM && ui.realUidHex == null) {
+                Text(
+                    text = stringResource(R.string.card_get_card_uid_auto_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 TextButton(
                     onClick = { viewModel.fetchRealUid() },
                     enabled = !ui.busy,

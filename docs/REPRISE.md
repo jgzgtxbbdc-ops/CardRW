@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-22 (U4 + re-auth auto clé mémorisée par AID)  
+**Dernière mise à jour :** 2026-07-22 (U5 moniteur polish)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — re-auth auto session  
+**Commit :** (voir `git log -1`) — U5 GetCardUID auto + preview  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -18,7 +18,7 @@
 | **FACTORY_KEY** copie défensive | ✅ `51a6d52` — voir contrat ci-dessous |
 | **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
-| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0–U4b ✅** — **U5** polish suivant |
+| **v0.6 UX** moniteur diagnostic écran Carte | ✅ **U0–U5** moniteur v0.6 clos |
 | **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
@@ -37,7 +37,14 @@
 | **U3** | Clés candidates selon intention / droits | ✅ |
 | **U4** | Arbre PICC super-nœud ; fichiers sous apps | ✅ **livré** |
 | **U4b** | Re-auth auto : dernière clé OK mémorisée par AID | ✅ **livré** (session carte) |
-| **U5** | GetCardUID auto, preview hex, polish | ⬜ **prochaine** |
+| **U5** | GetCardUID auto, preview hex, polish | ✅ **livré** |
+
+**U5 livré :**
+- GetCardUID **auto** après explore si Random ID + session auth (bouton secours si échec)
+- Preview hex **8 octets** sur nœud fichier sans expand ; expand = hex complet + taille
+- Badges accès : Lu / Auth / Free / Never / Erreur
+- Restore scroll moniteur après busy (auth / explore)
+- Coffre : dialog « enregistrer quand même » si auth KO + option cochée
 
 **U4 livré :**
 - `DesfireCardTree.kt` : PICC super-nœud → apps enfants → fichiers imbriqués (plus de PICC « comme une app »)
@@ -155,16 +162,16 @@ NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
   FACTORY_KEY + prepareCommand(clearHeaderLength) livrés (51a6d52)
-  v0.6 UX : U0–U4 ✅ ; prochaine U5 polish
-  Coffre : K0–K2 ✅ ; NFC app-wide ✅ ; CI ✅
-  U4 : DesfireCardTree + exploreByAid cache multi-AID
+  v0.6 UX moniteur : U0–U5 ✅
+  Coffre : K0–K2 ✅ (+ save malgré auth KO) ; NFC app-wide ✅ ; CI ✅
+  U4–U5 : arbre + multi-clés + clé standard auto + preview / GetCardUID auto
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
 Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 
 Prochaine tâche (une seule par session) :
-  A) U5 polish (GetCardUID auto, preview hex, restore scroll) — recommandé
-  B) Arbitrage SM EV2 avant Write (parc)
-  C) v1 WriteData — urgence seulement
+  A) Arbitrage SM EV2 avant Write (parc) — recommandé si write bientôt
+  B) v1 WriteData (header=7, carte sacrifiable)
+  C) K3 biométrie coffre — non prioritaire
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -174,12 +181,12 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — U5** : GetCardUID auto, preview hex, polish légende accès.  
-   - **B — EV2** : tester refus AES EV1 (`0xAA`) avant writes massifs.  
-   - **C — v1 Write** : header=7 ; carte sacrifiable.  
+   - **A — EV2** : tester refus AES EV1 (`0xAA`) avant writes massifs.  
+   - **B — v1 Write** : header=7 ; carte sacrifiable.  
+   - **C — K3** biométrie coffre (optionnel).  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : **U5** pour finir le moniteur ; Write après.
+Avis fil rouge : moniteur v0.6 **clos** ; **EV2** puis Write.
 
 ---
 

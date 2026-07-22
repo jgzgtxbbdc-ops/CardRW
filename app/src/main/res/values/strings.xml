@@ -35,6 +35,16 @@
     <string name="card_tree_title">Arbre carte (PICC → apps → fichiers)</string>
     <string name="card_tree_hint">Tap = select + lecture auto · Double-tap = auth clé par défaut (n°0 usine). Une seule app détaillée à la fois.</string>
     <string name="card_tree_legend">Trait plein = lisible / déjà lu · pointillé = lacune (droits, free-list, non exploré).</string>
+    <string name="card_tree_access_legend">Badges fichier : Lu · Auth · Free · Never · … · expand = hex complet.</string>
+    <string name="card_file_preview">%1$s</string>
+    <string name="card_file_data_full">Données (%1$d o, hex)</string>
+    <string name="card_file_badge_read">Lu</string>
+    <string name="card_file_badge_auth">Auth</string>
+    <string name="card_file_badge_free">Free</string>
+    <string name="card_file_badge_never">Never</string>
+    <string name="card_file_badge_error">Erreur</string>
+    <string name="card_file_badge_pending">…</string>
+    <string name="card_get_card_uid_auto_hint">UID réel : lecture auto après auth (Random ID). Secours ci-dessous si besoin.</string>
     <string name="card_tree_apps_header">Applications (%1$d)</string>
     <string name="card_tree_files_header">Fichiers (%1$d)</string>
     <string name="card_tree_picc_meta">Key settings PICC</string>

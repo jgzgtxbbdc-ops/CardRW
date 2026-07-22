@@ -170,7 +170,7 @@ Option labo opt-in éventuelle : hors scope U1–U4.
 | **U2** | Auth en bottom sheet ; panneau retiré du scroll ; barre session | ✅ 2026-07-22 — ModalBottomSheet + AuthSessionBar sticky | Moyen |
 | **U3** | `keysFor(intent)` ; candidates ; Free/Never ; CTA nœud | ✅ 2026-07-22 — AuthKeyPlanner + sheet slots + CTA fichier | Moyen |
 | **U4** | Arbre PICC super-nœud ; fichiers sous apps ; style plein/pointillé | ✅ 2026-07-22 — `DesfireCardTree` + cache multi-AID | Élevé |
-| **U5** | GetCardUID auto ; preview hex ; restore scroll ; légende accès | Polish terrain | Faible |
+| **U5** | GetCardUID auto ; preview hex ; restore scroll ; légende accès | ✅ 2026-07-22 — auto UID Random, preview 8 o, scroll, badges | Faible |
 
 **Ordre imposé :** U1 → U2 → U3 → U4 → U5.  
 **Ne pas** démarrer U4 sans U1 (arbre vide ou encore plein de CTA manuels).

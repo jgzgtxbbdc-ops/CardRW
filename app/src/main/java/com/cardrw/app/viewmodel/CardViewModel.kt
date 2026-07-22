@@ -1075,12 +1075,17 @@ class CardViewModel @Inject constructor(
                 if (fillRemembered) {
                     fillUnreadWithRememberedKeys(aidHex)
                 }
+                // U5 : GetCardUID auto si Random ID + session auth
+                maybeFetchRealUidSilent()
             },
             onFailure = { e -> handleOpFailure(e) },
         )
     }
 
-    /** GetCardUID après auth — utile si Random ID. */
+    /**
+     * GetCardUID après auth — utile si Random ID.
+     * U5 : aussi déclenché auto via [maybeFetchRealUidSilent] ; ce bouton reste en secours.
+     */
     fun fetchRealUid() {
         if (_ui.value.authSession?.authenticated != true) {
             _ui.update { it.copy(errorMessage = "Authentifie d’abord (GetCardUID nécessite une session).") }
@@ -1088,26 +1093,62 @@ class CardViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _ui.update { it.copy(busy = true, errorMessage = null, statusLine = "GetCardUID…") }
-            val result = withContext(Dispatchers.IO) {
-                withLiveClient { client ->
-                    Hex.encode(client.getCardUid())
+            val ok = maybeFetchRealUidSilent(force = true)
+            if (!ok && _ui.value.realUidHex == null) {
+                // maybeFetchRealUidSilent a déjà posé error si force
+            } else {
+                _ui.update { it.copy(busy = false, statusLine = null) }
+            }
+        }
+    }
+
+    /**
+     * U5 — GetCardUID silencieux si Random ID et UID réel encore inconnu.
+     * @param force true = bouton manuel (rapporte l’erreur)
+     * @return true si UID obtenu ou déjà connu / non applicable
+     */
+    private suspend fun maybeFetchRealUidSilent(force: Boolean = false): Boolean {
+        val state = _ui.value
+        if (state.realUidHex != null) return true
+        if (state.authSession?.authenticated != true) {
+            if (force) {
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        errorMessage = "Authentifie d’abord (GetCardUID nécessite une session).",
+                    )
                 }
             }
-            result.fold(
-                onSuccess = { uid ->
-                    _ui.update {
-                        it.copy(
-                            busy = false,
-                            realUidHex = uid,
-                            statusLine = null,
-                            errorMessage = null,
-                        )
-                    }
-                    syncJournal()
-                },
-                onFailure = { e -> handleOpFailure(e) },
-            )
+            return false
         }
+        if (!force && state.identity?.uidKind != UidKind.RANDOM) return true
+
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                Hex.encode(client.getCardUid())
+            }
+        }
+        return result.fold(
+            onSuccess = { uid ->
+                _ui.update {
+                    it.copy(
+                        realUidHex = uid,
+                        busy = if (force) false else it.busy,
+                        errorMessage = if (force) null else it.errorMessage,
+                        statusLine = if (force) null else it.statusLine,
+                    )
+                }
+                syncJournal()
+                true
+            },
+            onFailure = { e ->
+                if (force) {
+                    handleOpFailure(e)
+                }
+                // Auto : silencieux (carte / SM peut refuser)
+                false
+            },
+        )
     }
 
     fun resetToWaiting() {

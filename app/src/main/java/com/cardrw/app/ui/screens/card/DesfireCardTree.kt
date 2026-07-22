@@ -100,6 +100,11 @@ fun DesfireCardTree(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Text(
+            text = stringResource(R.string.card_tree_access_legend),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         // --- Super-nœud PICC ---
         TreeShell(
@@ -319,18 +324,35 @@ private fun FileTreeNode(
     sessionKey: Int?,
     onAuthForRead: () -> Unit,
 ) {
-    var expanded by rememberSaveable(node.fileNo) { mutableStateOf(node.dataHex != null) }
+    var expanded by rememberSaveable(node.fileNo) { mutableStateOf(false) }
     val rights = node.settings.accessRights
     val readPlan = remember(node.fileNo, rights, sessionKey) {
         AuthKeyPlanner.plan(AuthIntent.ReadFile(node.fileNo, rights), sessionKey)
     }
     val needsAuthForRead = node.dataHex == null && readPlan.barrier == AuthBarrier.NEEDS_KEY
     val neverRead = readPlan.barrier == AuthBarrier.NEVER
+    val dataHex = node.dataHex
     // Plein = contenu lu, Free, Never (état final), ou erreur connue
-    val complete = node.dataHex != null ||
+    val complete = dataHex != null ||
         neverRead ||
         rights.isReadFree ||
         node.dataError != null
+
+    val accessBadge = when {
+        dataHex != null -> stringResource(R.string.card_file_badge_read)
+        neverRead -> stringResource(R.string.card_file_badge_never)
+        rights.isReadFree -> stringResource(R.string.card_file_badge_free)
+        needsAuthForRead -> stringResource(R.string.card_file_badge_auth)
+        node.dataError != null -> stringResource(R.string.card_file_badge_error)
+        else -> stringResource(R.string.card_file_badge_pending)
+    }
+    val accessColor = when {
+        dataHex != null -> MaterialTheme.colorScheme.tertiary
+        neverRead -> MaterialTheme.colorScheme.error
+        needsAuthForRead -> MaterialTheme.colorScheme.primary
+        node.dataError != null -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     TreeShell(
         complete = complete,
@@ -345,19 +367,45 @@ private fun FileTreeNode(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = node.settings.summaryLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = node.settings.summaryLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(
+                        text = accessBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = accessColor,
+                    )
+                }
                 Text(
                     text = "R=${rights.readLabel} · W=${rights.writeLabel} · " +
                         "RW=${rights.readWriteLabel} · Ch=${rights.changeLabel}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!complete) {
+                // U5 : preview hex visible sans expand (P1 moniteur)
+                if (dataHex != null && !expanded) {
+                    Text(
+                        text = stringResource(
+                            R.string.card_file_preview,
+                            hexPreview(dataHex, maxBytes = 8),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                } else if (!complete && needsAuthForRead) {
                     Text(
                         text = stringResource(R.string.card_tree_file_incomplete),
                         style = MaterialTheme.typography.labelSmall,
@@ -388,7 +436,7 @@ private fun FileTreeNode(
                         ),
                     )
                 }
-            } else if (neverRead && node.dataHex == null) {
+            } else if (neverRead && dataHex == null) {
                 Text(
                     text = stringResource(R.string.card_file_read_never),
                     style = MaterialTheme.typography.labelSmall,
@@ -397,14 +445,16 @@ private fun FileTreeNode(
             }
 
             AnimatedVisibility(visible = expanded) {
-                val dataHex = node.dataHex
                 val dataError = node.dataError
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     HorizontalDivider()
                     when {
                         dataHex != null -> {
                             Text(
-                                text = stringResource(R.string.card_file_data),
+                                text = stringResource(
+                                    R.string.card_file_data_full,
+                                    dataHex.length / 2,
+                                ),
                                 style = MaterialTheme.typography.labelMedium,
                             )
                             Text(
@@ -665,3 +715,12 @@ internal fun prettyAid(hex: String): String {
 }
 
 internal fun prettyHex(hex: String): String = prettyAid(hex)
+
+/** Preview moniteur : N premiers octets + ellipse si plus long. */
+internal fun hexPreview(hex: String, maxBytes: Int = 8): String {
+    val clean = hex.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
+    if (clean.isEmpty()) return "—"
+    val take = clean.take(maxBytes * 2)
+    val pretty = take.chunked(2).joinToString(" ")
+    return if (clean.length > maxBytes * 2) "$pretty …" else pretty
+}
