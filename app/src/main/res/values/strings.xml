@@ -63,6 +63,21 @@
     <string name="card_auth_restored">Session restaurée (clé mémorisée)</string>
     <string name="card_auth_remembered_rejected">Clé mémorisée refusée — authentifie à nouveau.</string>
     <string name="card_no_apps">Aucune application (carte vierge)</string>
+    <!-- v1 labo écriture -->
+    <string name="card_lab_write_title">Labo écriture (v1)</string>
+    <string name="card_lab_write_hint">Create / Write sur session AES (EV1/EV2). Carte sacrifiable. Max 52 o par Write.</string>
+    <string name="card_lab_write_need_auth">Authentifie d’abord (AES) pour créer ou écrire.</string>
+    <string name="card_lab_write_des_block">Session DES usine (carte vierge) : pas de Write/Create AES ici. Bascule master PICC en AES (ChangeKey DES→AES) à venir, ou utilise une carte déjà AES.</string>
+    <string name="card_lab_create_app">Créer une application (PICC master AES)</string>
+    <string name="card_lab_aid_hex">AID (6 hex)</string>
+    <string name="card_lab_create_app_action">CreateApplication</string>
+    <string name="card_lab_create_file">Créer un fichier Standard</string>
+    <string name="card_lab_file_no">FileNo</string>
+    <string name="card_lab_file_size">Taille (o)</string>
+    <string name="card_lab_create_file_action">CreateStdDataFile (FULL, Free)</string>
+    <string name="card_lab_write_data">WriteData (FULL)</string>
+    <string name="card_lab_write_hex">Données hex</string>
+    <string name="card_lab_write_action">WriteData</string>
     <string name="card_error">Erreur de lecture</string>
     <string name="card_raw_fields">Détail technique GetVersion</string>
     <string name="card_raw_fields_show">Afficher le détail technique</string>

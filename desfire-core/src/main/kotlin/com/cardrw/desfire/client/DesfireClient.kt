@@ -5,6 +5,7 @@ import com.cardrw.desfire.crypto.AesCbc
 import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.crypto.DesCipher
 import com.cardrw.desfire.crypto.DesConstants
+import com.cardrw.desfire.crypto.SecureMessagingLevel
 import com.cardrw.desfire.framing.DesfireResponse
 import com.cardrw.desfire.framing.NativeFraming
 import com.cardrw.desfire.log.ApduDirection
@@ -692,6 +693,198 @@ class DesfireClient(
         }
     }
 
+    // -------------------------------------------------------------------------
+    // v1 — écriture structure / données (session AES EV1 ou EV2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * WriteData (0x3D) — fichier Standard.
+     *
+     * @param commMode mode du fichier (FULL → clearHeaderLength=7)
+     * @return nombre d’octets demandés en écriture
+     */
+    fun writeData(
+        fileNo: Int,
+        data: ByteArray,
+        offset: Int = 0,
+        commMode: CommMode = CommMode.FULL,
+    ): Int {
+        require(fileNo in 0..31) { "fileNo hors plage: $fileNo" }
+        require(offset >= 0) { "offset négatif" }
+        require(data.size <= 52) {
+            "Write labo limité à 52 o par trame (pas encore de chaînage AF TX), got ${data.size}"
+        }
+        val sess = requireAesSessionForWrite()
+
+        val payload = ByteArray(7 + data.size)
+        payload[0] = fileNo.toByte()
+        writeLe24(payload, 1, offset)
+        writeLe24(payload, 4, data.size)
+        data.copyInto(payload, 7)
+
+        val txData = when (commMode) {
+            CommMode.PLAIN ->
+                sess.prepareCommand(DesfireCommand.WRITE_DATA.code, payload, CommMode.PLAIN)
+            CommMode.MACED ->
+                sess.prepareCommand(DesfireCommand.WRITE_DATA.code, payload, CommMode.MACED)
+            CommMode.FULL ->
+                sess.prepareCommand(
+                    DesfireCommand.WRITE_DATA.code,
+                    payload,
+                    CommMode.FULL,
+                    clearHeaderLength = 7,
+                )
+        }
+
+        val response = exchange(DesfireCommand.WRITE_DATA, txData)
+        if (!response.isSuccess) {
+            throw DesfireProtocolException(
+                "WriteData($fileNo) failed: ${response.status.shortName} — ${response.status.pedagogicalFr}",
+                response,
+            )
+        }
+        try {
+            // Réponse typique : status + CMAC (PLAIN postprocess)
+            sess.postprocessResponse(response.data, response.sw2, CommMode.PLAIN)
+        } catch (e: SecureMessagingException) {
+            throw DesfireProtocolException("WriteData SM: ${e.message}", response)
+        }
+        return data.size
+    }
+
+    /**
+     * CreateApplication (0xCA).
+     *
+     * @param keySettings byte settings (ex. 0x0F labo ouvert)
+     * @param maxKeys nombre de clés 1–14
+     * @param aesCrypto true → nibble crypto AES (0x8x)
+     */
+    fun createApplication(
+        aid: Aid,
+        keySettings: Int = 0x0F,
+        maxKeys: Int = 2,
+        aesCrypto: Boolean = true,
+    ) {
+        require(maxKeys in 1..14) { "maxKeys 1–14, got $maxKeys" }
+        requireAesSessionForWrite()
+        val settings2 = ((if (aesCrypto) 0x80 else 0x00) or (maxKeys and 0x0F))
+        val data = aid.bytes + byteArrayOf(
+            (keySettings and 0xFF).toByte(),
+            settings2.toByte(),
+        )
+        exchangeAuthenticatedPlain(DesfireCommand.CREATE_APPLICATION, data)
+    }
+
+    /**
+     * CreateStdDataFile (0xCD).
+     *
+     * @param commSettings 0x00 plain, 0x01 MAC, 0x03 FULL
+     * @param accessRights raw big-endian 16-bit (NXP MDAR packing)
+     */
+    fun createStdDataFile(
+        fileNo: Int,
+        fileSize: Int,
+        commSettings: Int = 0x03,
+        accessRights: Int = 0xEEEE,
+    ) {
+        require(fileNo in 0..31) { "fileNo hors plage: $fileNo" }
+        require(fileSize in 1..8192) { "fileSize hors plage labo: $fileSize" }
+        requireAesSessionForWrite()
+        val data = ByteArray(7)
+        data[0] = fileNo.toByte()
+        data[1] = (commSettings and 0xFF).toByte()
+        data[2] = ((accessRights ushr 8) and 0xFF).toByte()
+        data[3] = (accessRights and 0xFF).toByte()
+        writeLe24(data, 4, fileSize)
+        exchangeAuthenticatedPlain(DesfireCommand.CREATE_STD_DATA_FILE, data)
+    }
+
+    /**
+     * ChangeKey (0xC4) AES — session **AES** (EV1/EV2), pas DES legacy.
+     * Cas simple : changer une clé alors qu’on est authentifié (souvent maître 0).
+     *
+     * @param keyNo slot à changer
+     * @param newKey AES-128 (16 o)
+     * @param keyVersion octet version AES (souvent 0)
+     */
+    fun changeKeyAes(
+        keyNo: Int,
+        newKey: ByteArray,
+        keyVersion: Int = 0,
+    ) {
+        require(keyNo in 0..13)
+        require(newKey.size == AesConstants.KEY_SIZE_BYTES) {
+            "nouvelle clé AES 16 o, got ${newKey.size}"
+        }
+        val sess = requireAesSessionForWrite()
+        // KeyNo clair + newKey ‖ version (chiffrés en FULL, header=1)
+        val data = byteArrayOf(keyNo.toByte()) + newKey + byteArrayOf((keyVersion and 0xFF).toByte())
+        val tx = sess.prepareCommand(
+            DesfireCommand.CHANGE_KEY.code,
+            data,
+            CommMode.FULL,
+            clearHeaderLength = 1,
+        )
+        val response = exchange(DesfireCommand.CHANGE_KEY, tx)
+        if (!response.isSuccess) {
+            throw DesfireProtocolException(
+                "ChangeKey($keyNo) failed: ${response.status.shortName} — ${response.status.pedagogicalFr}",
+                response,
+            )
+        }
+        try {
+            sess.postprocessResponse(response.data, response.sw2, CommMode.PLAIN)
+        } catch (e: SecureMessagingException) {
+            throw DesfireProtocolException("ChangeKey SM: ${e.message}", response)
+        }
+        // Si on a changé la clé de session courante, l’auth est morte côté carte
+        if (sess.keyNumber == keyNo) {
+            session = null
+        }
+    }
+
+    private fun requireAesSessionForWrite(): DesfireSecureSession {
+        val sess = session
+            ?: throw DesfireProtocolException(
+                "Écriture : authentifie d’abord (session AES EV1/EV2 requise).",
+            )
+        if (sess.smLevel == SecureMessagingLevel.DES_LEGACY) {
+            throw DesfireProtocolException(
+                "Session DES usine (carte vierge) : Write/Create/ChangeKey AES non disponibles ici. " +
+                    "Il faut d’abord basculer la master PICC en AES (ChangeKey DES→AES — prochaine tranche) " +
+                    "ou utiliser une carte déjà en AES.",
+            )
+        }
+        return sess
+    }
+
+    /** Commande structure plain + CMAC session (CreateApplication / CreateStdDataFile). */
+    private fun exchangeAuthenticatedPlain(command: DesfireCommand, data: ByteArray) {
+        val sess = requireAesSessionForWrite()
+        val txData = sess.prepareMetaCommand(command.code, data)
+        val frames = mutableListOf<ByteArray>()
+        var response = exchange(command, txData)
+        frames += response.data
+        var guard = 0
+        while (response.isAdditionalFrame && guard < 8) {
+            response = exchange(DesfireCommand.ADDITIONAL_FRAME)
+            frames += response.data
+            guard++
+        }
+        if (!response.isSuccess) {
+            throw DesfireProtocolException(
+                "${command.displayName} failed: ${response.status.shortName} — ${response.status.pedagogicalFr}",
+                response,
+            )
+        }
+        val concat = frames.fold(ByteArray(0)) { acc, b -> acc + b }
+        try {
+            sess.postprocessMetaResponse(concat, response.sw2)
+        } catch (e: SecureMessagingException) {
+            throw DesfireProtocolException("${command.displayName} SM: ${e.message}", response)
+        }
+    }
+
     /**
      * Explore une application déjà sélectionnée.
      *
@@ -1007,6 +1200,18 @@ class DesfireClient(
             DesfireCommand.READ_DATA ->
                 if (data.size >= 1) "ReadData (fichier ${data[0].toInt() and 0xFF})"
                 else "ReadData"
+            DesfireCommand.WRITE_DATA ->
+                if (data.isNotEmpty()) "WriteData (fichier ${data[0].toInt() and 0xFF})"
+                else "WriteData"
+            DesfireCommand.CREATE_APPLICATION ->
+                if (data.size >= 3) "CreateApplication (${Hex.encode(data.copyOf(3))})"
+                else "CreateApplication"
+            DesfireCommand.CREATE_STD_DATA_FILE ->
+                if (data.isNotEmpty()) "CreateStdDataFile (fichier ${data[0].toInt() and 0xFF})"
+                else "CreateStdDataFile"
+            DesfireCommand.CHANGE_KEY ->
+                if (data.isNotEmpty()) "ChangeKey (clé n°${data[0].toInt() and 0xFF})"
+                else "ChangeKey"
             DesfireCommand.GET_FILE_SETTINGS ->
                 if (data.isNotEmpty()) "GetFileSettings (fichier ${data[0].toInt() and 0xFF})"
                 else "GetFileSettings"

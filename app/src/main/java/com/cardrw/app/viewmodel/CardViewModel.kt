@@ -1082,6 +1082,150 @@ class CardViewModel @Inject constructor(
         )
     }
 
+    // -------------------------------------------------------------------------
+    // v1 labo — écriture (session AES EV1/EV2)
+    // -------------------------------------------------------------------------
+
+    /**
+     * WriteData sur le fichier [fileNo] (hex compact).
+     * [commModeWire] : 0 plain, 1 MAC, 3 FULL (défaut FULL labo).
+     */
+    fun writeFileData(fileNo: Int, dataHex: String, commModeWire: Int = 0x03) {
+        val clean = dataHex.replace(Regex("[^0-9a-fA-F]"), "")
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "WriteData fichier $fileNo…")
+            }
+            val bytes = try {
+                require(clean.length % 2 == 0) { "hex impair (${clean.length})" }
+                Hex.decode(clean)
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(busy = false, errorMessage = "Données hex invalides : ${e.message}")
+                }
+                return@launch
+            }
+            val mode = when (commModeWire and 0x03) {
+                0x00 -> com.cardrw.desfire.model.CommMode.PLAIN
+                0x01 -> com.cardrw.desfire.model.CommMode.MACED
+                else -> com.cardrw.desfire.model.CommMode.FULL
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.writeData(fileNo, bytes, offset = 0, commMode = mode)
+                }
+            }
+            result.fold(
+                onSuccess = { n ->
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            statusLine = "WriteData OK — $n o → fichier $fileNo",
+                            errorMessage = null,
+                        )
+                    }
+                    syncJournal()
+                    _ui.value.selectedAidHex?.let { runExplore(it, fillRemembered = true) }
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
+    /** CreateApplication labo (AES, settings ouverts 0x0F). */
+    fun createApplicationLab(aidHex: String, maxKeys: Int = 3) {
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "CreateApplication…")
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.createApplication(
+                        aid = Aid.fromHex(aidHex),
+                        keySettings = 0x0F,
+                        maxKeys = maxKeys.coerceIn(1, 14),
+                        aesCrypto = true,
+                    )
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            statusLine = "CreateApplication OK — AID ${aidHex.uppercase()}",
+                            errorMessage = null,
+                        )
+                    }
+                    syncJournal()
+                    // Re-lire identité pour rafraîchir la liste d’apps
+                    refreshIdentityAfterStructureChange()
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
+    /** CreateStdDataFile labo (FULL, droits Free 0xEEEE par défaut). */
+    fun createStdFileLab(
+        fileNo: Int,
+        sizeBytes: Int = 16,
+        commSettings: Int = 0x03,
+        accessRights: Int = 0xEEEE,
+    ) {
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "CreateStdDataFile $fileNo…")
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.createStdDataFile(
+                        fileNo = fileNo,
+                        fileSize = sizeBytes,
+                        commSettings = commSettings,
+                        accessRights = accessRights,
+                    )
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            statusLine = "CreateStdDataFile OK — fichier $fileNo ($sizeBytes o)",
+                            errorMessage = null,
+                        )
+                    }
+                    syncJournal()
+                    _ui.value.selectedAidHex?.let { runExplore(it, fillRemembered = true) }
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
+    private suspend fun refreshIdentityAfterStructureChange() {
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                val uid = liveUid
+                client.readIdentity(uid)
+            }
+        }
+        result.fold(
+            onSuccess = { identity ->
+                _ui.update {
+                    it.copy(
+                        identity = identity,
+                        exploreByAid = emptyMap(),
+                        explore = null,
+                    )
+                }
+                syncJournal()
+            },
+            onFailure = { /* status déjà posé par l’op structure */ },
+        )
+    }
+
     /**
      * GetCardUID après auth — utile si Random ID.
      * U5 : aussi déclenché auto via [maybeFetchRealUidSilent] ; ce bouton reste en secours.

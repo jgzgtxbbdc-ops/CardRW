@@ -78,6 +78,8 @@ import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.viewmodel.CardPhase
 import com.cardrw.app.viewmodel.CardUiState
 import com.cardrw.app.viewmodel.CardViewModel
+import com.cardrw.desfire.crypto.AesConstants
+import com.cardrw.desfire.crypto.SecureMessagingLevel
 import com.cardrw.desfire.model.AuthBarrier
 import com.cardrw.desfire.model.AuthIntent
 import com.cardrw.desfire.model.AuthKeyPlan
@@ -86,7 +88,6 @@ import com.cardrw.desfire.model.CardIdentity
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.model.VersionInfo
 import com.cardrw.desfire.session.AuthSession
-import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.util.Hex
 import kotlinx.coroutines.delay
 
@@ -371,6 +372,15 @@ private fun ReadyMonitor(
                         openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
                     }
                 },
+            )
+
+            // v1 labo — écriture (session AES)
+            LabWriteSection(
+                ui = ui,
+                busy = ui.busy,
+                onCreateApp = { aid -> viewModel.createApplicationLab(aid) },
+                onCreateFile = { fileNo, size -> viewModel.createStdFileLab(fileNo, size) },
+                onWrite = { fileNo, hex -> viewModel.writeFileData(fileNo, hex) },
             )
 
             if (identity.rawNotes.isNotEmpty()) {
@@ -910,6 +920,168 @@ private fun AuthSheetContent(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(stringResource(R.string.card_auth_cancel))
+        }
+    }
+}
+
+/**
+ * Panneau labo v1 : CreateApplication / CreateStdDataFile / WriteData.
+ * Visible dès qu’une session auth existe (DES = message d’aide ; AES = actions).
+ */
+@Composable
+private fun LabWriteSection(
+    ui: CardUiState,
+    busy: Boolean,
+    onCreateApp: (String) -> Unit,
+    onCreateFile: (fileNo: Int, size: Int) -> Unit,
+    onWrite: (fileNo: Int, hex: String) -> Unit,
+) {
+    val session = ui.authSession
+    val authenticated = session?.authenticated == true
+    val isDes = session?.smLevel == SecureMessagingLevel.DES_LEGACY
+    val isPicc = ui.selectedAidHex.equals("000000", ignoreCase = true)
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var aidHex by rememberSaveable { mutableStateOf("F00102") }
+    var fileNoText by rememberSaveable { mutableStateOf("0") }
+    var fileSizeText by rememberSaveable { mutableStateOf("16") }
+    var writeHex by rememberSaveable { mutableStateOf("0011223344556677") }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.card_lab_write_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = null,
+                )
+            }
+            if (!expanded) return@Column
+
+            Text(
+                text = stringResource(R.string.card_lab_write_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (!authenticated) {
+                Text(
+                    text = stringResource(R.string.card_lab_write_need_auth),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                return@Column
+            }
+            if (isDes) {
+                Text(
+                    text = stringResource(R.string.card_lab_write_des_block),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                return@Column
+            }
+
+            if (isPicc) {
+                Text(
+                    text = stringResource(R.string.card_lab_create_app),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                OutlinedTextField(
+                    value = aidHex,
+                    onValueChange = {
+                        aidHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(6)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.card_lab_aid_hex)) },
+                    singleLine = true,
+                    enabled = !busy,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                )
+                Button(
+                    onClick = { onCreateApp(aidHex) },
+                    enabled = !busy && aidHex.length == 6,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.card_lab_create_app_action))
+                }
+            } else {
+                Text(
+                    text = stringResource(R.string.card_lab_create_file),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = fileNoText,
+                        onValueChange = { fileNoText = it.filter { c -> c.isDigit() }.take(2) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text(stringResource(R.string.card_lab_file_no)) },
+                        singleLine = true,
+                        enabled = !busy,
+                    )
+                    OutlinedTextField(
+                        value = fileSizeText,
+                        onValueChange = { fileSizeText = it.filter { c -> c.isDigit() }.take(4) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text(stringResource(R.string.card_lab_file_size)) },
+                        singleLine = true,
+                        enabled = !busy,
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        val fn = fileNoText.toIntOrNull() ?: 0
+                        val sz = fileSizeText.toIntOrNull() ?: 16
+                        onCreateFile(fn, sz)
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.card_lab_create_file_action))
+                }
+
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.card_lab_write_data),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                OutlinedTextField(
+                    value = writeHex,
+                    onValueChange = {
+                        writeHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(104)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.card_lab_write_hex)) },
+                    supportingText = {
+                        Text("${writeHex.length / 2} o · fichier $fileNoText")
+                    },
+                    enabled = !busy,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                )
+                Button(
+                    onClick = {
+                        val fn = fileNoText.toIntOrNull() ?: 0
+                        onWrite(fn, writeHex)
+                    },
+                    enabled = !busy && writeHex.length >= 2 && writeHex.length % 2 == 0,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.card_lab_write_action))
+                }
+            }
         }
     }
 }

@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-22 (EV2 auth + fallback)  
+**Dernière mise à jour :** 2026-07-22 (v1 labo Write/Create)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — AuthenticateEV2First + SM EV2  
+**Commit :** (voir `git log -1`) — WriteData + Create + UI labo  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -23,7 +23,7 @@
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
 | Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
-| **v1** Write / Create / ChangeKey / dumps | ⬜ après moniteur (idéal U5) |
+| **v1** Write / Create / ChangeKey / dumps | 🔄 **API + UI labo** Write/Create (AES) ; ChangeKey AES ; DES→AES ChangeKey à faire |
 
 ### v0.6 UX — moniteur Carte
 
