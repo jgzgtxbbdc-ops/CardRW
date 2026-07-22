@@ -3,7 +3,7 @@
 **Dernière mise à jour :** 2026-07-22 (U4 arbre moniteur PICC → apps → fichiers)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** `bcb20dd` — U4 arbre moniteur PICC → apps → fichiers
+**Commit :** `defbc55` — U4 arbre moniteur PICC → apps → fichiers
 **Branche :** `main` = `origin/main`
 
 ---
