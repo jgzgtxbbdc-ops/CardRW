@@ -186,6 +186,7 @@ Option labo opt-in éventuelle : hors scope U1–U4.
 
 - Refonte wizard création app / templates  
 - Anneau de clés complet (CDC §7.3) — mais U3 prépare les statuts « clé testée »  
+- **Coffre-fort de clés** — spec et jalon séparés : [`UX_COFFRE_CLES.md`](UX_COFFRE_CLES.md) (idéal après U2)  
 - Mode débutant / expert global (peut s’appuyer sur densité d’arbre plus tard)  
 - SM EV2, dumps, formatage  
 

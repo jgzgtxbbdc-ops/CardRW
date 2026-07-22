@@ -105,7 +105,9 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **v0.6 U0** — spec moniteur Carte `docs/UX_ECRAN_CARTE.md` (2026-07-22)
 - [ ] **v0.6 U1** — pull auto post-select / post-auth
 - [ ] **v0.6 U2–U5** — sheet auth, clés candidates, arbre PICC, polish (voir spec)
+- [x] **Coffre K0** — spec `docs/UX_COFFRE_CLES.md` (2026-07-22)
+- [ ] **Coffre K1–K2** — persistance + dropdown/save à l’auth (après U2 de préférence)
 - [ ] Arbitrage EV2 avant writes
 - [ ] v1 : write / create / ChangeKey / dumps (WriteData header=7, ChangeKey header=1)
 
-Voir aussi `docs/REPRISE.md` pour la reprise multi-machine et `docs/UX_ECRAN_CARTE.md` pour l’UX Carte.
+Voir aussi `docs/REPRISE.md`, `docs/UX_ECRAN_CARTE.md`, `docs/UX_COFFRE_CLES.md`.

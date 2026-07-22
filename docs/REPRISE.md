@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
 **Dernière mise à jour :** 2026-07-22  
-**Machine d’arrêt :** (session design UX)  
+**Machine d’arrêt :** (session design UX + coffre)  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** voir `git log -1` (U0 docs UX attendu sur `main`)  
+**Commit :** voir `git log -1`  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -19,6 +19,7 @@
 | **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
 | **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0 spec ✅** — code U1→U5 à faire |
+| **Coffre-fort de clés** | 🔄 **K0 spec ✅** — code K1→K3 après U2 de préférence |
 | Décision EV2 avant écritures massives | ⬜ à trancher (parc cartes) |
 | **v1** Write / Create / ChangeKey / dumps | ⬜ après U1+ (idéal U2–U3) |
 
@@ -36,6 +37,20 @@
 | **U5** | GetCardUID auto, preview hex, polish | ⬜ |
 
 **Principes (rappel) :** (1) afficher dès que lisible (2) scroll = info, saisie = fenêtre (3) arbre DESFire (4) demander la/les clés capables de l’op.
+
+### Coffre-fort de clés
+
+**Spec :** [`docs/UX_COFFRE_CLES.md`](UX_COFFRE_CLES.md) (source de vérité)
+
+| Tranche | Contenu | État |
+|---|---|---|
+| **K0** | Spec mécanique + sécu progressive + modèle données | ✅ |
+| **K1** | Meta + SecretStore persistant + CRUD + liste | ⬜ |
+| **K2** | Sheet auth : dropdown **ou** hex + ☐ enregistrer | ⬜ (idéalement après **U2**) |
+| **K3** | Unlock biométrie / device credential optionnel | ⬜ |
+| **K4** | Polish (suggestions nom, récents, export…) | ⬜ |
+
+**Rappel :** slot carte 0–13 ≠ entrée coffre (nom → matériau). Anneau CDC §7.3 = statut sur la carte.
 
 ### Contrat crypto déjà livré (ne pas refaire)
 
@@ -101,6 +116,7 @@ git pull origin main
 
 - CDC : `docs/cahier-des-charges-desfire-ev3.md`  
 - **UX Carte (v0.6) :** `docs/UX_ECRAN_CARTE.md`  
+- **Coffre-fort (K0) :** `docs/UX_COFFRE_CLES.md`  
 - Labo : `docs/NOTES_LABO.md`  
 - Commandes : `docs/ANNEXE_A_COMMANDES.md`  
 - Cette note : `docs/REPRISE.md`
@@ -114,19 +130,22 @@ Projet CardRW — reprise
 Repo : (chemin local) — origin jgzgtxbbdc-ops/CardRW
 git log -1
 CDC : docs/cahier-des-charges-desfire-ev3.md
-UX Carte : docs/UX_ECRAN_CARTE.md   ← source de vérité moniteur v0.6
+UX Carte : docs/UX_ECRAN_CARTE.md   ← moniteur v0.6
+Coffre : docs/UX_COFFRE_CLES.md     ← noms de clés / SecretStore
 NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
   FACTORY_KEY + prepareCommand(clearHeaderLength) livrés (51a6d52)
-  v0.6 UX : U0 spec ✅ ; code U1→U5 à faire
+  v0.6 UX : U0 ✅ ; code U1→U5 à faire
+  Coffre : K0 ✅ ; code K1→K3 après U2 de préférence
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
-Hors scope immédiat : refaire v0/crypto livré, relire tout le CDC, U4 arbre avant U1
+Hors scope immédiat : refaire v0/crypto livré, U4 avant U1, coffre avant U1, biométrie K3 avant mécanique K1
 
 Prochaine tâche (une seule par session) :
-  A) U1 pull auto post-select/auth (docs/UX_ECRAN_CARTE.md) — recommandé
-  B) Arbitrage SM EV2 avant Write (parc cartes)
-  C) v1 WriteData Standard — seulement si urgence ; sinon après U1+
+  A) U1 pull auto post-select/auth (UX_ECRAN_CARTE.md) — recommandé
+  B) U2 sheet auth puis K1–K2 coffre (UX_COFFRE_CLES.md)
+  C) Arbitrage SM EV2 avant Write (parc)
+  D) v1 WriteData — urgence seulement ; sinon après U1+
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -136,13 +155,13 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — U1** : `selectApplication` / `authenticate` enchaînent explore ; string Actualiser ; terrain.  
-     Puis U2 sheet → U3 candidates → U4 arbre (voir `UX_ECRAN_CARTE.md`).  
+   - **A — U1** : pull auto select/auth ; Actualiser ; terrain.  
+     Puis **U2** sheet → **K1–K2** coffre (dropdown + save) → U3 → U4.  
    - **B — EV2** : tester refus AES EV1 (`0xAA`) → décider avant writes massifs.  
-   - **C — v1 Write** : `prepareCommand` header=7 ; carte sacrifiable — **après U1** si possible.  
+   - **C — v1 Write** : header=7 ; carte sacrifiable — **après U1** si possible.  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : **U1 (puis U2–U3) avant un gros C** ; ne pas commencer l’arbre U4 sans pull auto.
+Avis fil rouge : **U1 → U2 → coffre K1–K2** avant un gros Write ; pas d’arbre U4 sans pull auto ; pas de biométrie avant la mécanique coffre.
 
 ---
 

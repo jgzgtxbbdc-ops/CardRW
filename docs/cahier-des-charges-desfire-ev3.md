@@ -2,7 +2,7 @@
 
 **Nom commercial :** CardRW  
 **applicationId :** `com.cardrw.app`  
-**Version document :** 1.3 — 22 juillet 2026  
+**Version document :** 1.4 — 22 juillet 2026  
 **Statut :** document de travail — arbitrages §12 clos ✅  
 **Historique :**
 
@@ -12,6 +12,7 @@
 | 1.1 | 2026-07-21 | Protocole DESFire explicite, découpage releases, sécurité locale des secrets, robustesse NFC terrain, NFR, presets détaillés |
 | 1.2 | 2026-07-21 | Arbitrages : nom CardRW, open source différé, SecretStore, `{{uid}}`, idempotence hybride, labo cartes |
 | 1.3 | 2026-07-22 | §7 : principes moniteur diagnostic écran Carte + renvoi `docs/UX_ECRAN_CARTE.md` (v0.6) |
+| 1.4 | 2026-07-22 | §6.2 / §7 : coffre-fort de clés nommé + renvoi `docs/UX_COFFRE_CLES.md` |
 
 ---
 
@@ -206,6 +207,17 @@ Chaque exclusion apparaît dans un encart « Pour aller plus loin » aux endroit
 | **Backup Android** | Exclure les stores de secrets de l’auto-backup (ou master key non extractible) |
 | **Export utilisateur** | Inchangé : JSON volontairement en clair si option cochée + avertissement |
 
+#### 6.2.1 Coffre-fort de clés (appareil) 🆕
+
+Bibliothèque **nommée** de matériaux crypto sur l’appareil (ergonomie labo / atelier : travailler avec des noms plutôt que des hex de 32 caractères).
+
+- **Distinct** de l’anneau de clés par application (§7.3) : le coffre stocke des *matériaux* réutilisables ; l’anneau décrit les *slots* 0–13 sur la carte.  
+- Au point d’usage (auth, plus tard write) : choisir une entrée du coffre **ou** saisir l’hex, avec option **enregistrer** (nom défaut `key1`, `key2`, … renommable).  
+- Métadonnées (noms, dates) hors secret ; octets via `SecretStore` (alias `vault.<id>`).  
+- Sécurité progressive : at-rest Keystore d’abord ; **biométrie / credential appareil optionnels** plus tard — pas de mot de passe applicatif custom au MVP.  
+
+Détail UX, modèle, tranches K0–K4 : [`docs/UX_COFFRE_CLES.md`](UX_COFFRE_CLES.md).
+
 ---
 
 ## 7. Structure de l'interface
@@ -215,6 +227,7 @@ Structure retenue : **hybride wizard guidé + explorateur arborescent**, avec qu
 ```
 Accueil
  ├── 📡 Carte         — lire / encoder une carte (wizard + explorateur)
+ ├── 🔐 Coffre-fort   — clés nommées (matériaux)                 (K1+ ; spec UX_COFFRE_CLES)
  ├── 🧩 Templates     — créer, éditer, lancer une série          (dès v1.1)
  ├── 💾 Dumps         — importer, exporter, restaurer            (restore v1.2)
  └── 📜 Journal APDU  — historique des trames (global ou par session)
@@ -258,6 +271,8 @@ Comportement moniteur (auto-pull, sheets, clés candidates) : **`docs/UX_ECRAN_C
 
 ### 7.3 Écran « Anneau de clés » (par application)
 
+Vue **par application (ou PICC) posée** : état de chaque **slot** DESFire 0–13 sur la carte — **pas** le coffre-fort appareil (§6.2.1).
+
 ```
 Clé n°   Type      Statut              Actions
 0        AES-128   Modifiée            [Authentifier] [Changer]
@@ -268,6 +283,8 @@ Clé n°   Type      Statut              Actions
 ```
 
 Statuts possibles 🆕 : `Non testée` | `Usine (auth OK)` | `Non usine (auth OK avec clé fournie)` | `Échec` | `Inconnu`.
+
+À l’auth : le **matériau** peut venir du **coffre-fort** (nom) ou d’une saisie hex (§6.2.1 / `UX_COFFRE_CLES.md`).
 
 ### 7.4 Matrice des droits d'accès
 
@@ -656,6 +673,14 @@ Les valeurs exactes (AID, tailles) sont finalisées à l’implémentation et ve
 - Clés candidates selon intention ; arbre PICC → apps → fichiers  
 
 **Critère de done :** checklist terrain §9 de `UX_ECRAN_CARTE.md` (select sans Explorer obligatoire, sheet auth, PICC racine, candidats de clé).
+
+### v0.7 — Coffre-fort de clés (mécanique) 🆕
+
+- Entrées nommées (`keyN` renommables) ; octets via `SecretStore`  
+- Point d’usage : dropdown coffre **ou** hex + enregistrer  
+- Spec `docs/UX_COFFRE_CLES.md` (K1–K2 ; K3 unlock optionnel)  
+
+**Critère de done :** checklist §10 de `UX_COFFRE_CLES.md` (persistance, auth par nom, pas d’hex dans le journal).
 
 ### v1 — Outil d’atelier utile (sans usine à templates)
 
