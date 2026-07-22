@@ -28,6 +28,7 @@ import com.cardrw.desfire.session.AuthSession
 import com.cardrw.desfire.util.Hex
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,6 +55,14 @@ data class CardUiState(
     /** Message d’opération court (pas de doublon avec le profil). */
     val statusLine: String? = null,
     val tagPresent: Boolean = false,
+    /**
+     * Flash sobre « auth OK clé par défaut » (double-tap app) — l’UI l’affiche ~1 s.
+     */
+    val defaultAuthFlash: Boolean = false,
+    /**
+     * Incrémenté pour demander l’ouverture de la sheet auth (échec auto-auth silencieux).
+     */
+    val openAuthSheetNonce: Long = 0L,
 )
 
 enum class CardPhase {
@@ -215,8 +224,11 @@ class CardViewModel @Inject constructor(
     /**
      * SelectApplication puis **pull auto** du directory (U1 / moniteur diagnostic).
      * L’auth est invalidée par le select côté client.
+     *
+     * @param tryDefaultAuth double-tap : tente clé par défaut (slot 0 + usine 00…00) ;
+     *   succès → flash UI ; échec silencieux → explore puis sheet auth standard.
      */
-    fun selectApplication(aidHex: String) {
+    fun selectApplication(aidHex: String, tryDefaultAuth: Boolean = false) {
         viewModelScope.launch {
             _ui.update {
                 it.copy(
@@ -226,6 +238,7 @@ class CardViewModel @Inject constructor(
                     errorMessage = null,
                     busy = true,
                     statusLine = "SelectApplication…",
+                    defaultAuthFlash = false,
                 )
             }
             val result = withContext(Dispatchers.IO) {
@@ -241,15 +254,80 @@ class CardViewModel @Inject constructor(
                         it.copy(
                             authSession = null,
                             errorMessage = null,
-                            // busy reste true : enchaîne explore
                         )
                     }
                     syncJournal()
-                    runExplore(aidHex)
+                    if (tryDefaultAuth) {
+                        tryDefaultAuthThenExplore(aidHex)
+                    } else {
+                        runExplore(aidHex)
+                    }
                 },
                 onFailure = { e -> handleOpFailure(e, selectedAidHex = aidHex) },
             )
         }
+    }
+
+    /**
+     * Authentifie avec la **clé par défaut labo** : slot carte n°0 + matériau usine `00…00`.
+     * Succès → [CardUiState.defaultAuthFlash] + explore.
+     * Échec → aucun message d’erreur ; explore partiel + [CardUiState.openAuthSheetNonce].
+     */
+    private suspend fun tryDefaultAuthThenExplore(aidHex: String) {
+        val keyNo = DEFAULT_AUTH_KEY_NO
+        val keyBytes = AesConstants.FACTORY_KEY.copyOf()
+        val keyHex = Hex.encode(keyBytes)
+        _ui.update {
+            it.copy(
+                keyNo = keyNo,
+                keyHex = keyHex,
+                busy = true,
+                errorMessage = null,
+                statusLine = "Auth clé par défaut (n°$keyNo, usine)…",
+            )
+        }
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.ensureApplicationSelected(Aid.fromHex(aidHex))
+                client.authenticateAes(keyNo, keyBytes, aidHex)
+                client.authSession
+            }
+        }
+        result.fold(
+            onSuccess = { session ->
+                _ui.update {
+                    it.copy(
+                        authSession = session,
+                        errorMessage = null,
+                        defaultAuthFlash = true,
+                        statusLine = null,
+                    )
+                }
+                syncJournal()
+                runExplore(aidHex)
+                viewModelScope.launch {
+                    delay(DEFAULT_AUTH_FLASH_MS)
+                    _ui.update { it.copy(defaultAuthFlash = false) }
+                }
+            },
+            onFailure = {
+                // Silencieux : pas d’errorMessage — sheet auth standard
+                syncJournal()
+                _ui.update {
+                    it.copy(
+                        authSession = null,
+                        errorMessage = null,
+                        statusLine = null,
+                        openAuthSheetNonce = it.openAuthSheetNonce + 1,
+                    )
+                }
+                runExplore(aidHex)
+            },
+        )
+    }
+
+    fun clearDefaultAuthFlash() {
+        _ui.update { it.copy(defaultAuthFlash = false) }
     }
 
     /**
@@ -600,5 +678,11 @@ class CardViewModel @Inject constructor(
     override fun onCleared() {
         closeLive()
         super.onCleared()
+    }
+
+    companion object {
+        /** Slot carte pour auto-auth double-tap (clé maître app / PICC). */
+        const val DEFAULT_AUTH_KEY_NO = 0
+        const val DEFAULT_AUTH_FLASH_MS = 1_000L
     }
 }

@@ -1,9 +1,14 @@
 package com.cardrw.app.ui.screens.card
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +29,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Nfc
@@ -62,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -216,6 +223,13 @@ private fun ReadyMonitor(
         if (showAuthSheet) viewModel.reloadVault()
     }
 
+    // Échec auto-auth (double-tap) → sheet standard, sans message d’erreur
+    LaunchedEffect(ui.openAuthSheetNonce) {
+        if (ui.openAuthSheetNonce > 0L) {
+            openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
+        }
+    }
+
     // Ferme la sheet après auth OK (explore auto U1 peut encore tourner : on ferme dès session OK + !busy auth phase)
     LaunchedEffect(ui.busy, ui.authSession?.authenticated, ui.errorMessage, closeSheetWhenAuthSettles) {
         if (!closeSheetWhenAuthSettles) return@LaunchedEffect
@@ -255,6 +269,7 @@ private fun ReadyMonitor(
                     openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
                 },
             )
+            DefaultAuthSuccessFlash(visible = ui.defaultAuthFlash)
             if (neverMessage != null && !showAuthSheet) {
                 Text(
                     text = neverMessage!!,
@@ -313,8 +328,12 @@ private fun ReadyMonitor(
                 selectedAidHex = ui.selectedAidHex,
                 friendlyName = viewModel::friendlyName,
                 enabled = !ui.busy,
-                onSelect = viewModel::selectApplication,
-                onSelectPicc = { viewModel.selectApplication("000000") },
+                onSelect = { hex -> viewModel.selectApplication(hex, tryDefaultAuth = false) },
+                onSelectPicc = { viewModel.selectApplication("000000", tryDefaultAuth = false) },
+                onDoubleSelect = { hex -> viewModel.selectApplication(hex, tryDefaultAuth = true) },
+                onDoubleSelectPicc = {
+                    viewModel.selectApplication("000000", tryDefaultAuth = true)
+                },
             )
 
             if (ui.selectedAidHex != null) {
@@ -1211,6 +1230,38 @@ private fun TechnicalRow(label: String, value: String) {
 }
 
 @Composable
+private fun DefaultAuthSuccessFlash(visible: Boolean) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.92f),
+        exit = fadeOut() + scaleOut(targetScale = 0.96f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(22.dp),
+            )
+            Text(
+                text = stringResource(R.string.card_default_auth_ok),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
 private fun ApplicationsSection(
     applications: List<Aid>,
     selectedAidHex: String?,
@@ -1218,6 +1269,8 @@ private fun ApplicationsSection(
     enabled: Boolean,
     onSelect: (String) -> Unit,
     onSelectPicc: () -> Unit,
+    onDoubleSelect: (String) -> Unit,
+    onDoubleSelectPicc: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
@@ -1236,6 +1289,7 @@ private fun ApplicationsSection(
             selected = selectedAidHex.equals("000000", ignoreCase = true),
             enabled = enabled,
             onClick = onSelectPicc,
+            onDoubleClick = onDoubleSelectPicc,
         )
         if (applications.isEmpty()) {
             Text(
@@ -1255,6 +1309,7 @@ private fun ApplicationsSection(
                         selected = hex.equals(selectedAidHex, ignoreCase = true),
                         enabled = enabled,
                         onClick = { onSelect(hex) },
+                        onDoubleClick = { onDoubleSelect(hex) },
                     )
                 }
             }
@@ -1270,6 +1325,7 @@ private fun ApplicationRow(
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    onDoubleClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(10.dp)
     val borderColor = if (selected) {
@@ -1290,7 +1346,13 @@ private fun ApplicationRow(
             .clip(shape)
             .border(width = if (selected) 2.dp else 1.dp, color = borderColor, shape = shape)
             .background(bg)
-            .clickable(enabled = enabled, onClick = onClick)
+            .pointerInput(enabled, prettyHex) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(
+                    onDoubleTap = { onDoubleClick() },
+                    onTap = { onClick() },
+                )
+            }
             .height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
