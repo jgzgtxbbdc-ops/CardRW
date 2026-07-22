@@ -56,9 +56,11 @@ data class CardUiState(
     val statusLine: String? = null,
     val tagPresent: Boolean = false,
     /**
-     * Flash sobre « auth OK clé par défaut » (double-tap app) — l’UI l’affiche ~1 s.
+     * Flash sobre d’auth réussie — texte via [authSuccessMessage] ; auto-clear après délai.
      */
-    val defaultAuthFlash: Boolean = false,
+    val authSuccessFlash: Boolean = false,
+    /** Message du flash (défaut vs manuel). */
+    val authSuccessMessage: String? = null,
     /**
      * Incrémenté pour demander l’ouverture de la sheet auth (échec auto-auth silencieux).
      */
@@ -238,7 +240,8 @@ class CardViewModel @Inject constructor(
                     errorMessage = null,
                     busy = true,
                     statusLine = "SelectApplication…",
-                    defaultAuthFlash = false,
+                    authSuccessFlash = false,
+                    authSuccessMessage = null,
                 )
             }
             val result = withContext(Dispatchers.IO) {
@@ -299,16 +302,12 @@ class CardViewModel @Inject constructor(
                     it.copy(
                         authSession = session,
                         errorMessage = null,
-                        defaultAuthFlash = true,
                         statusLine = null,
                     )
                 }
                 syncJournal()
                 runExplore(aidHex)
-                viewModelScope.launch {
-                    delay(DEFAULT_AUTH_FLASH_MS)
-                    _ui.update { it.copy(defaultAuthFlash = false) }
-                }
+                showAuthSuccessFlash(DEFAULT_AUTH_OK_MESSAGE)
             },
             onFailure = {
                 // Silencieux : pas d’errorMessage — sheet auth standard
@@ -326,8 +325,20 @@ class CardViewModel @Inject constructor(
         )
     }
 
-    fun clearDefaultAuthFlash() {
-        _ui.update { it.copy(defaultAuthFlash = false) }
+    private fun showAuthSuccessFlash(message: String) {
+        _ui.update {
+            it.copy(authSuccessFlash = true, authSuccessMessage = message)
+        }
+        viewModelScope.launch {
+            delay(AUTH_SUCCESS_FLASH_MS)
+            _ui.update {
+                if (it.authSuccessMessage == message) {
+                    it.copy(authSuccessFlash = false, authSuccessMessage = null)
+                } else {
+                    it
+                }
+            }
+        }
     }
 
     /**
@@ -390,31 +401,24 @@ class CardViewModel @Inject constructor(
             }
             result.fold(
                 onSuccess = { session ->
+                    var vaultNote: String? = null
                     if (saveAsVaultName != null && vaultEntryId == null) {
                         try {
                             keyVault.create(saveAsVaultName, keyBytes)
                         } catch (e: Exception) {
-                            // Auth OK ; échec save non bloquant
-                            _ui.update {
-                                it.copy(
-                                    authSession = session,
-                                    errorMessage = null,
-                                    statusLine = "Auth OK — coffre : ${e.message}",
-                                )
-                            }
-                            syncJournal()
-                            runExplore(aidHex)
-                            return@fold
+                            vaultNote = "Auth OK — coffre : ${e.message}"
                         }
                     }
                     _ui.update {
                         it.copy(
                             authSession = session,
                             errorMessage = null,
+                            statusLine = vaultNote,
                         )
                     }
                     syncJournal()
                     runExplore(aidHex)
+                    showAuthSuccessFlash(MANUAL_AUTH_OK_MESSAGE)
                 },
                 onFailure = { e -> handleOpFailure(e) },
             )
@@ -683,6 +687,10 @@ class CardViewModel @Inject constructor(
     companion object {
         /** Slot carte pour auto-auth double-tap (clé maître app / PICC). */
         const val DEFAULT_AUTH_KEY_NO = 0
-        const val DEFAULT_AUTH_FLASH_MS = 1_000L
+        /** Durée d’affichage du bandeau d’auth réussie. */
+        const val AUTH_SUCCESS_FLASH_MS = 2_500L
+        const val DEFAULT_AUTH_OK_MESSAGE =
+            "Authentification réussie avec la clé par défaut"
+        const val MANUAL_AUTH_OK_MESSAGE = "Authentification réussie"
     }
 }

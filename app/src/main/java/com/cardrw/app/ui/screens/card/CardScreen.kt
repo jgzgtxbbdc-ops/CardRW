@@ -269,7 +269,11 @@ private fun ReadyMonitor(
                     openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
                 },
             )
-            DefaultAuthSuccessFlash(visible = ui.defaultAuthFlash)
+            AuthSuccessFlash(
+                visible = ui.authSuccessFlash,
+                message = ui.authSuccessMessage
+                    ?: stringResource(R.string.card_auth_ok),
+            )
             if (neverMessage != null && !showAuthSheet) {
                 Text(
                     text = neverMessage!!,
@@ -1230,7 +1234,7 @@ private fun TechnicalRow(label: String, value: String) {
 }
 
 @Composable
-private fun DefaultAuthSuccessFlash(visible: Boolean) {
+private fun AuthSuccessFlash(visible: Boolean, message: String) {
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn() + scaleIn(initialScale = 0.92f),
@@ -1252,7 +1256,7 @@ private fun DefaultAuthSuccessFlash(visible: Boolean) {
                 modifier = Modifier.size(22.dp),
             )
             Text(
-                text = stringResource(R.string.card_default_auth_ok),
+                text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
