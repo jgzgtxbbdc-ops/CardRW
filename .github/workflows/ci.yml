@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Un seul run par ref ; annule les précédents encore en cours.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Cœur crypto : Kotlin pur, indépendant d'Android (CDC §5.3) ──
+  # Rapide, déterministe, c'est le filet de sécurité du secure messaging.
+  desfire-core:
+    name: desfire-core · tests unitaires
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle (cache intégré)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests desfire-core
+        run: ./gradlew :desfire-core:test --stacktrace
+
+      - name: Publier les résultats de tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desfire-core-test-results
+          path: desfire-core/build/reports/tests/test/
+          if-no-files-found: ignore
+
+  # ── Module Android : compile + tests JVM du module :app ──
+  # Ferme l'angle mort UI (ViewModels, coffre, écrans) qu'un build local
+  # est aujourd'hui seul à couvrir. Nécessite le SDK Android (compileSdk 35).
+  app:
+    name: app · assembleDebug + testDebug
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle (cache intégré)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug + tests unitaires app
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace
+
+      - name: Publier l'APK debug
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
