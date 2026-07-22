@@ -62,7 +62,7 @@
     <string name="card_auth_ok">Authentification réussie</string>
     <string name="card_auth_restored">Session restaurée (clé mémorisée)</string>
     <string name="card_auth_remembered_rejected">Clé mémorisée refusée — authentifie à nouveau.</string>
-    <string name="card_no_apps">Aucune application (carte vide)</string>
+    <string name="card_no_apps">Aucune application (carte vierge)</string>
     <string name="card_error">Erreur de lecture</string>
     <string name="card_raw_fields">Détail technique GetVersion</string>
     <string name="card_raw_fields_show">Afficher le détail technique</string>
