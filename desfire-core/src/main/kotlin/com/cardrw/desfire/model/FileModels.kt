@@ -62,6 +62,7 @@ data class AccessRights(
 
     val isReadFree: Boolean get() = (read and 0x0F) == 0x0E
     val isReadNever: Boolean get() = (read and 0x0F) == 0x0F
+    val isWriteFree: Boolean get() = (write and 0x0F) == 0x0E || (readWrite and 0x0F) == 0x0E
 
     /**
      * True si [authKeyNo] peut lire : Free, ou clé = Read, ou clé = ReadWrite.
@@ -75,6 +76,26 @@ data class AccessRights(
         if (authKeyNo == null) return false
         val k = authKeyNo and 0x0F
         return k == r || k == rw
+    }
+
+    /**
+     * True si la session a le droit W ou RW (pas Free — Free = tout le monde, y compris sans clé).
+     * Aligné freefare `madame_soleil` : Free ne compte pas comme « clé de comm ».
+     */
+    fun sessionHasWriteKey(authKeyNo: Int?): Boolean {
+        if (authKeyNo == null) return false
+        val k = authKeyNo and 0x0F
+        val w = write and 0x0F
+        val rw = readWrite and 0x0F
+        return (w in 0..13 && k == w) || (rw in 0..13 && k == rw)
+    }
+
+    fun sessionHasReadKey(authKeyNo: Int?): Boolean {
+        if (authKeyNo == null) return false
+        val k = authKeyNo and 0x0F
+        val r = read and 0x0F
+        val rw = readWrite and 0x0F
+        return (r in 0..13 && k == r) || (rw in 0..13 && k == rw)
     }
 
     companion object {
@@ -115,6 +136,28 @@ data class FileSettings(
             append("Fichier $fileNo · ${fileType.labelFr}")
             if (sizeBytes != null) append(" · $sizeBytes o")
             append(" · ${commMode.labelFr}")
+        }
+
+    /**
+     * Mode effectif pour **écriture** (aligné freefare `madame_soleil_get_write_communication_settings`) :
+     * si la session n’est pas la clé W/RW (ex. Free `0xE`, ou clé maître 0 hors droits),
+     * le PICC parle en **PLAIN** même si le fichier est déclaré FULL/MAC.
+     * Sinon → [commMode] du fichier.
+     */
+    fun effectiveCommModeForWrite(sessionKeyNo: Int?): CommMode =
+        if (accessRights.sessionHasWriteKey(sessionKeyNo)) commMode else CommMode.PLAIN
+
+    /**
+     * Mode effectif pour **lecture** (même heuristique freefare côté Read).
+     */
+    fun effectiveCommModeForRead(sessionKeyNo: Int?): CommMode =
+        if (accessRights.sessionHasReadKey(sessionKeyNo) || accessRights.isReadFree && sessionKeyNo == null) {
+            // Free sans session : plain ; Free avec session non-R : freefare → plain
+            if (accessRights.sessionHasReadKey(sessionKeyNo)) commMode else CommMode.PLAIN
+        } else if (accessRights.isReadFree) {
+            CommMode.PLAIN
+        } else {
+            commMode
         }
 
     companion object {

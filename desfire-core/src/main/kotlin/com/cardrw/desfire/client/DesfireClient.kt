@@ -700,14 +700,16 @@ class DesfireClient(
     /**
      * WriteData (0x3D) — fichier Standard.
      *
-     * @param commMode mode du fichier (FULL → clearHeaderLength=7)
+     * @param commMode mode **effectif** (voir [FileSettings.effectiveCommModeForWrite]) :
+     *   Free / session hors W·RW → [CommMode.PLAIN] même si le fichier est FULL
+     *   (sinon le PICC renvoie souvent `0x7E` Length error).
      * @return nombre d’octets demandés en écriture
      */
     fun writeData(
         fileNo: Int,
         data: ByteArray,
         offset: Int = 0,
-        commMode: CommMode = CommMode.FULL,
+        commMode: CommMode = CommMode.PLAIN,
     ): Int {
         require(fileNo in 0..31) { "fileNo hors plage: $fileNo" }
         require(offset >= 0) { "offset négatif" }
@@ -724,6 +726,7 @@ class DesfireClient(
 
         val txData = when (commMode) {
             CommMode.PLAIN ->
+                // Données en clair + MAJ IV CMAC (pas de MAC append sur TX)
                 sess.prepareCommand(DesfireCommand.WRITE_DATA.code, payload, CommMode.PLAIN)
             CommMode.MACED ->
                 sess.prepareCommand(DesfireCommand.WRITE_DATA.code, payload, CommMode.MACED)
@@ -739,7 +742,12 @@ class DesfireClient(
         val response = exchange(DesfireCommand.WRITE_DATA, txData)
         if (!response.isSuccess) {
             throw DesfireProtocolException(
-                "WriteData($fileNo) failed: ${response.status.shortName} — ${response.status.pedagogicalFr}",
+                "WriteData($fileNo) failed: ${response.status.shortName} — ${response.status.pedagogicalFr}" +
+                    if (response.status == DesfireStatus.LENGTH_ERROR) {
+                        " · Astuce : fichier Free → écrire en PLAIN (pas FULL)."
+                    } else {
+                        ""
+                    },
                 response,
             )
         }
@@ -747,7 +755,10 @@ class DesfireClient(
             // Réponse typique : status + CMAC (PLAIN postprocess)
             sess.postprocessResponse(response.data, response.sw2, CommMode.PLAIN)
         } catch (e: SecureMessagingException) {
-            throw DesfireProtocolException("WriteData SM: ${e.message}", response)
+            // Status seul sans CMAC : tolérer si data vide
+            if (response.data.isNotEmpty()) {
+                throw DesfireProtocolException("WriteData SM: ${e.message}", response)
+            }
         }
         return data.size
     }
@@ -1034,7 +1045,9 @@ class DesfireClient(
                 else -> {
                     try {
                         val len = settings.sizeBytes ?: 0
-                        val data = readData(settings.fileNo, 0, len, settings.commMode)
+                        // Free / hors clé R·RW → PLAIN effectif (sinon SM faux)
+                        val rxMode = settings.effectiveCommModeForRead(session?.keyNumber)
+                        val data = readData(settings.fileNo, 0, len, rxMode)
                         dataHex = Hex.encode(data)
                     } catch (e: Exception) {
                         if (isAuthOrPermissionBarrier(e)) {

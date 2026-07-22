@@ -1088,9 +1088,9 @@ class CardViewModel @Inject constructor(
 
     /**
      * WriteData sur le fichier [fileNo] (hex compact).
-     * [commModeWire] : 0 plain, 1 MAC, 3 FULL (défaut FULL labo).
+     * Mode SM déduit des FileSettings + session (Free → PLAIN, même si fichier FULL).
      */
-    fun writeFileData(fileNo: Int, dataHex: String, commModeWire: Int = 0x03) {
+    fun writeFileData(fileNo: Int, dataHex: String) {
         val clean = dataHex.replace(Regex("[^0-9a-fA-F]"), "")
         viewModelScope.launch {
             _ui.update {
@@ -1105,11 +1105,16 @@ class CardViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val mode = when (commModeWire and 0x03) {
-                0x00 -> com.cardrw.desfire.model.CommMode.PLAIN
-                0x01 -> com.cardrw.desfire.model.CommMode.MACED
-                else -> com.cardrw.desfire.model.CommMode.FULL
+            val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+            val settings = _ui.value.explore?.files?.find { it.fileNo == fileNo }?.settings
+            val mode = settings?.effectiveCommModeForWrite(sessionKey)
+                ?: com.cardrw.desfire.model.CommMode.PLAIN
+            val modeHint = when (mode) {
+                com.cardrw.desfire.model.CommMode.PLAIN -> "PLAIN"
+                com.cardrw.desfire.model.CommMode.MACED -> "MAC"
+                com.cardrw.desfire.model.CommMode.FULL -> "FULL"
             }
+            _ui.update { it.copy(statusLine = "WriteData fichier $fileNo ($modeHint)…") }
             val result = withContext(Dispatchers.IO) {
                 withLiveClient { client ->
                     client.writeData(fileNo, bytes, offset = 0, commMode = mode)

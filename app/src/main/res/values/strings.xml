@@ -75,7 +75,7 @@
     <string name="card_lab_file_no">FileNo</string>
     <string name="card_lab_file_size">Taille (o)</string>
     <string name="card_lab_create_file_action">CreateStdDataFile (FULL, Free)</string>
-    <string name="card_lab_write_data">WriteData (FULL)</string>
+    <string name="card_lab_write_data">WriteData (mode auto : Free→PLAIN, sinon settings fichier)</string>
     <string name="card_lab_write_hex">Données hex</string>
     <string name="card_lab_write_action">WriteData</string>
     <string name="card_error">Erreur de lecture</string>

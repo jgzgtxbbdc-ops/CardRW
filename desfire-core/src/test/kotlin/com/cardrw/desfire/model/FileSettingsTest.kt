@@ -56,6 +56,28 @@ class FileSettingsTest {
     }
 
     @Test
+    fun free_write_uses_plain_even_if_file_full() {
+        // Create lab Free 0xEEEE + FULL wire → write effectif PLAIN (sinon 0x7E)
+        val rights = AccessRights.parse(0xEEEE)
+        val fs = FileSettings(
+            fileNo = 15,
+            fileType = FileType.STANDARD,
+            commMode = CommMode.FULL,
+            accessRights = rights,
+            sizeBytes = 16,
+            raw = byteArrayOf(0),
+        )
+        assertEquals(CommMode.PLAIN, fs.effectiveCommModeForWrite(sessionKeyNo = 0))
+        assertEquals(CommMode.PLAIN, fs.effectiveCommModeForWrite(sessionKeyNo = null))
+        // Clé W dédiée → FULL
+        val protected = AccessRights.parse(0x2000) // R=2 W=0 ...
+        // 0x2000: R=2, W=0, RW=0, Ch=0
+        val fs2 = fs.copy(accessRights = AccessRights.parse(0x2000))
+        assertEquals(CommMode.FULL, fs2.effectiveCommModeForWrite(sessionKeyNo = 0))
+        assertEquals(CommMode.PLAIN, fs2.effectiveCommModeForWrite(sessionKeyNo = 1))
+    }
+
+    @Test
     fun key_settings_parse() {
         val info = KeySettingsInfo.parse(Hex.decode("0F81"))
         assertEquals(0x0F, info.settingsRaw)
