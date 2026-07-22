@@ -71,6 +71,20 @@ data class CardUiState(
      * Incrémenté pour demander l’ouverture de la sheet auth (échec auto-auth silencieux).
      */
     val openAuthSheetNonce: Long = 0L,
+    /**
+     * Proposition d’enregistrer le matériau hex malgré un échec d’auth
+     * (ex. bon secret, mauvais slot carte). Non null → dialog UI.
+     */
+    val pendingVaultSave: PendingVaultSaveOffer? = null,
+)
+
+/**
+ * Offre d’enregistrement coffre après auth refusée (matériau en mémoire VM uniquement).
+ */
+data class PendingVaultSaveOffer(
+    val displayName: String,
+    /** Hex 32 pour affichage masqué / debug UI si besoin. */
+    val keyHexMasked: String = "••••••••",
 )
 
 enum class CardPhase {
@@ -128,6 +142,9 @@ class CardViewModel @Inject constructor(
      * pour ne pas reboucler sur une carte re-encodée. Cleared avec la mémoire session.
      */
     private val factoryFailedSlotsByAid = mutableMapOf<String, MutableSet<Int>>()
+
+    /** Matériau en attente d’enregistrement coffre après auth KO (wipe sur dismiss / create). */
+    private var pendingVaultKeyBytes: ByteArray? = null
 
     init {
         viewModelScope.launch { keyVault.load() }
@@ -593,6 +610,7 @@ class CardViewModel @Inject constructor(
         rememberedKeysByAid.clear()
         lastKeyNoByAid.clear()
         factoryFailedSlotsByAid.clear()
+        clearPendingVaultSave(wipeMaterial = true)
     }
 
     /**
@@ -862,6 +880,7 @@ class CardViewModel @Inject constructor(
             }
             result.fold(
                 onSuccess = { session ->
+                    clearPendingVaultSave(wipeMaterial = true)
                     var resolvedVaultId = vaultEntryId
                     var vaultNote: String? = null
                     if (saveAsVaultName != null && vaultEntryId == null) {
@@ -878,14 +897,93 @@ class CardViewModel @Inject constructor(
                             authSession = session,
                             errorMessage = null,
                             statusLine = vaultNote,
+                            pendingVaultSave = null,
                         )
                     }
                     syncJournal()
                     runExplore(aidHex, fillRemembered = true)
                     showAuthSuccessFlash(MANUAL_AUTH_OK_MESSAGE)
                 },
-                onFailure = { e -> handleOpFailure(e) },
+                onFailure = { e ->
+                    syncJournal()
+                    // Hex + option « enregistrer » : proposer le coffre malgré l’échec
+                    // (souvent bon matériau, mauvais n° de slot carte).
+                    if (saveAsVaultName != null && vaultEntryId == null) {
+                        offerVaultSaveDespiteAuthFailure(
+                            displayName = saveAsVaultName,
+                            keyBytes = keyBytes,
+                            authError = humanize(e),
+                        )
+                    } else {
+                        handleOpFailure(e)
+                    }
+                },
             )
+        }
+    }
+
+    /**
+     * Auth KO alors que l’utilisateur voulait sauver le matériau → dialog
+     * « Enregistrer quand même ? » (slot peut être faux, secret correct).
+     */
+    private fun offerVaultSaveDespiteAuthFailure(
+        displayName: String,
+        keyBytes: ByteArray,
+        authError: String,
+    ) {
+        pendingVaultKeyBytes?.fill(0)
+        pendingVaultKeyBytes = keyBytes.copyOf()
+        _ui.update {
+            it.copy(
+                busy = false,
+                errorMessage = authError,
+                statusLine = null,
+                pendingVaultSave = PendingVaultSaveOffer(
+                    displayName = displayName.trim().ifEmpty { keyVault.nextDefaultName() },
+                ),
+            )
+        }
+    }
+
+    /** Confirme l’enregistrement coffre après auth refusée. */
+    fun confirmPendingVaultSave() {
+        val offer = _ui.value.pendingVaultSave ?: return
+        val bytes = pendingVaultKeyBytes
+        if (bytes == null || bytes.size != 16) {
+            dismissPendingVaultSave()
+            _ui.update { it.copy(errorMessage = "Matériau indisponible — resaisis la clé.") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                keyVault.create(offer.displayName, bytes)
+                clearPendingVaultSave(wipeMaterial = true)
+                reloadVault()
+                _ui.update {
+                    it.copy(
+                        pendingVaultSave = null,
+                        statusLine = "Clé « ${offer.displayName} » enregistrée dans le coffre.",
+                        errorMessage = it.errorMessage, // garde le message d’auth KO
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(errorMessage = "Coffre : ${e.message}")
+                }
+            }
+        }
+    }
+
+    /** Refuse d’enregistrer après auth KO. */
+    fun dismissPendingVaultSave() {
+        clearPendingVaultSave(wipeMaterial = true)
+        _ui.update { it.copy(pendingVaultSave = null) }
+    }
+
+    private fun clearPendingVaultSave(wipeMaterial: Boolean) {
+        if (wipeMaterial) {
+            pendingVaultKeyBytes?.fill(0)
+            pendingVaultKeyBytes = null
         }
     }
 
@@ -1036,6 +1134,7 @@ class CardViewModel @Inject constructor(
                 explore = null,
                 exploreByAid = emptyMap(),
                 realUidHex = null,
+                pendingVaultSave = null,
                 tagPresent = true,
             )
         }

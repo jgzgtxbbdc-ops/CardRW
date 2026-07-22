@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Nfc
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -403,6 +404,32 @@ private fun ReadyMonitor(
                 },
             )
         }
+    }
+
+    // Auth KO + option coffre cochée → proposer d’enregistrer quand même (mauvais slot ?)
+    ui.pendingVaultSave?.let { offer ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPendingVaultSave() },
+            title = { Text(stringResource(R.string.card_vault_save_failed_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.card_vault_save_failed_message,
+                        offer.displayName,
+                    ),
+                )
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.confirmPendingVaultSave() }) {
+                    Text(stringResource(R.string.card_vault_save_failed_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissPendingVaultSave() }) {
+                    Text(stringResource(R.string.card_vault_save_failed_dismiss))
+                }
+            },
+        )
     }
 }
 

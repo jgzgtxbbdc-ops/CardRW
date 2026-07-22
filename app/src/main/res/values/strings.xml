@@ -91,7 +91,11 @@
     <string name="card_auth_material">Matériau (secret)</string>
     <string name="card_auth_from_vault">Coffre-fort</string>
     <string name="card_auth_from_hex">Saisie hex</string>
-    <string name="card_auth_save_vault">Enregistrer dans le coffre après auth OK</string>
+    <string name="card_auth_save_vault">Enregistrer dans le coffre (après auth OK, ou proposer si échec)</string>
+    <string name="card_vault_save_failed_title">Authentification échouée</string>
+    <string name="card_vault_save_failed_message">L’auth a été refusée (mauvais n° de slot ? clé incorrecte ?).\n\nEnregistrer quand même la clé « %1$s » dans le coffre pour la réutiliser plus tard ?</string>
+    <string name="card_vault_save_failed_confirm">Enregistrer quand même</string>
+    <string name="card_vault_save_failed_dismiss">Ne pas enregistrer</string>
     <string name="card_auth_vault_empty_hint">Coffre vide — saisis l’hex (option enregistrer) ou gère le coffre depuis l’accueil.</string>
     <string name="card_auth_keys_show_all">Afficher tous les slots 0–13…</string>
     <string name="card_auth_keys_candidates_only">Slots utiles seulement</string>
