@@ -105,7 +105,8 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **v0.6 U0** — spec moniteur Carte `docs/UX_ECRAN_CARTE.md` (2026-07-22)
 - [x] **v0.6 U1** — pull auto post-select / post-auth ; Actualiser (2026-07-22)
 - [x] **v0.6 U2** — auth bottom sheet + session sticky (2026-07-22)
-- [ ] **v0.6 U3–U5** — clés candidates, arbre PICC, polish (voir spec)
+- [x] **v0.6 U3** — clés candidates AuthKeyPlanner + CTA fichier (2026-07-22)
+- [ ] **v0.6 U4–U5** — arbre PICC, polish (voir spec)
 - [x] **Coffre K0** — spec `docs/UX_COFFRE_CLES.md` (2026-07-22)
 - [x] **Coffre K1–K2** — EncryptedPrefs + écran + sheet dropdown/save (2026-07-22)
 - [ ] Arbitrage EV2 avant writes

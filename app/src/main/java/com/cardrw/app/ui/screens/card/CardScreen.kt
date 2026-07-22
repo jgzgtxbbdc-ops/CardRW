@@ -77,6 +77,10 @@ import com.cardrw.app.viewmodel.CardUiState
 import com.cardrw.app.viewmodel.CardViewModel
 import com.cardrw.desfire.model.Aid
 import com.cardrw.desfire.model.ApplicationExploreResult
+import com.cardrw.desfire.model.AuthBarrier
+import com.cardrw.desfire.model.AuthIntent
+import com.cardrw.desfire.model.AuthKeyPlan
+import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.CardIdentity
 import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
@@ -184,7 +188,29 @@ private fun ReadyMonitor(
     val isPicc = ui.selectedAidHex.equals("000000", ignoreCase = true)
     val vaultEntries by viewModel.vaultEntries.collectAsStateWithLifecycle()
     var showAuthSheet by rememberSaveable { mutableStateOf(false) }
+    var authPlan by remember { mutableStateOf<AuthKeyPlan?>(null) }
+    var neverMessage by remember { mutableStateOf<String?>(null) }
     var closeSheetWhenAuthSettles by remember { mutableStateOf(false) }
+
+    fun openAuthSheet(plan: AuthKeyPlan, forceGenericIfNone: Boolean = false) {
+        neverMessage = null
+        when (plan.barrier) {
+            AuthBarrier.NEVER -> {
+                neverMessage = plan.detailMessage ?: plan.titleHint
+            }
+            AuthBarrier.NONE -> {
+                if (forceGenericIfNone) {
+                    val sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber
+                    authPlan = AuthKeyPlanner.plan(AuthIntent.Generic, sessionKey)
+                    showAuthSheet = true
+                }
+            }
+            AuthBarrier.NEEDS_KEY -> {
+                authPlan = plan
+                showAuthSheet = true
+            }
+        }
+    }
 
     LaunchedEffect(showAuthSheet) {
         if (showAuthSheet) viewModel.reloadVault()
@@ -224,8 +250,18 @@ private fun ReadyMonitor(
                 session = ui.authSession,
                 selectedAid = ui.selectedAidHex,
                 busy = ui.busy,
-                onOpenAuth = { showAuthSheet = true },
+                onOpenAuth = {
+                    // Barre session : plan contextuel, sinon générique (changer de clé)
+                    openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
+                },
             )
+            if (neverMessage != null && !showAuthSheet) {
+                Text(
+                    text = neverMessage!!,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             if (ui.errorMessage != null && !showAuthSheet) {
                 Text(
                     text = ui.errorMessage,
@@ -308,7 +344,14 @@ private fun ReadyMonitor(
             }
 
             ui.explore?.let { explore ->
-                ExplorerSection(explore = explore)
+                ExplorerSection(
+                    explore = explore,
+                    busy = ui.busy,
+                    sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber,
+                    onAuthForFile = { node ->
+                        openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
+                    },
+                )
             }
 
             if (identity.rawNotes.isNotEmpty()) {
@@ -327,15 +370,22 @@ private fun ReadyMonitor(
     }
 
     if (showAuthSheet) {
+        val plan = authPlan ?: AuthKeyPlanner.plan(
+            AuthIntent.Generic,
+            ui.authSession?.takeIf { it.authenticated }?.keyNumber,
+        )
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = {
-                if (!ui.busy) showAuthSheet = false
+                if (!ui.busy) {
+                    showAuthSheet = false
+                    authPlan = null
+                }
             },
             sheetState = sheetState,
         ) {
             AuthSheetContent(
-                initialKeyNo = ui.keyNo,
+                authPlan = plan,
                 initialKeyHex = ui.keyHex,
                 vaultEntries = vaultEntries,
                 defaultSaveName = viewModel.nextVaultDefaultName(),
@@ -344,7 +394,10 @@ private fun ReadyMonitor(
                 selectedAid = ui.selectedAidHex,
                 errorMessage = ui.errorMessage,
                 onDismiss = {
-                    if (!ui.busy) showAuthSheet = false
+                    if (!ui.busy) {
+                        showAuthSheet = false
+                        authPlan = null
+                    }
                 },
                 onAuthenticate = { request ->
                     closeSheetWhenAuthSettles = true
@@ -476,13 +529,14 @@ private fun AuthSessionBar(
 }
 
 /**
- * Formulaire auth en bottom sheet (U2 + K2).
+ * Formulaire auth en bottom sheet (U2 + K2 + U3).
+ * Slot carte restreint aux [AuthKeyPlan.candidates] quand connus.
  * Matériau : coffre nommé **ou** hex (+ option enregistrer).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AuthSheetContent(
-    initialKeyNo: Int,
+    authPlan: AuthKeyPlan,
     initialKeyHex: String,
     vaultEntries: List<KeyVaultEntryMeta>,
     defaultSaveName: String,
@@ -494,7 +548,8 @@ private fun AuthSheetContent(
     onAuthenticate: (AuthMaterialRequest) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    var draftKeyNo by remember { mutableIntStateOf(initialKeyNo.coerceIn(0, 13)) }
+    val preferred = (authPlan.preferKeyNo ?: 0).coerceIn(0, 13)
+    var draftKeyNo by remember(authPlan) { mutableIntStateOf(preferred) }
     var draftKeyHex by remember {
         mutableStateOf(initialKeyHex.replace(Regex("[^0-9a-fA-F]"), "").uppercase())
     }
@@ -506,6 +561,15 @@ private fun AuthSheetContent(
     var saveToVault by remember { mutableStateOf(false) }
     var saveName by remember { mutableStateOf(defaultSaveName) }
     var localError by remember { mutableStateOf<String?>(null) }
+    var showAllKeys by remember(authPlan) {
+        mutableStateOf(authPlan.candidates.isEmpty())
+    }
+
+    val chips: List<Int> = when {
+        showAllKeys -> (0..13).toList()
+        authPlan.candidates.isNotEmpty() -> authPlan.candidates.map { it.keyNo }.distinct()
+        else -> (0..13).toList()
+    }
 
     LaunchedEffect(vaultEntries) {
         if (vaultEntries.isEmpty()) {
@@ -544,7 +608,7 @@ private fun AuthSheetContent(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = stringResource(R.string.card_auth_title),
+            text = authPlan.titleHint,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
         )
@@ -554,6 +618,13 @@ private fun AuthSheetContent(
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        authPlan.detailMessage?.let { detail ->
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         Text(
@@ -581,12 +652,29 @@ private fun AuthSheetContent(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            for (n in 0..13) {
+            for (n in chips) {
+                val role = authPlan.candidates.find { it.keyNo == n }?.roleLabel
                 FilterChip(
                     selected = draftKeyNo == n,
                     onClick = { draftKeyNo = n },
-                    label = { Text("$n") },
+                    label = {
+                        Text(if (role != null && chips.size <= 4) "$n · $role" else "$n")
+                    },
                     enabled = !busy,
+                )
+            }
+        }
+        if (authPlan.candidates.isNotEmpty()) {
+            TextButton(
+                onClick = { showAllKeys = !showAllKeys },
+                enabled = !busy,
+            ) {
+                Text(
+                    if (showAllKeys) {
+                        stringResource(R.string.card_auth_keys_candidates_only)
+                    } else {
+                        stringResource(R.string.card_auth_keys_show_all)
+                    },
                 )
             }
         }
@@ -767,7 +855,12 @@ private fun AuthSheetContent(
 }
 
 @Composable
-private fun ExplorerSection(explore: ApplicationExploreResult) {
+private fun ExplorerSection(
+    explore: ApplicationExploreResult,
+    busy: Boolean,
+    sessionKey: Int?,
+    onAuthForFile: (FileNode) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = stringResource(R.string.card_explorer_title, prettyAid(explore.aidHex)),
@@ -826,7 +919,12 @@ private fun ExplorerSection(explore: ApplicationExploreResult) {
             )
         } else {
             for (node in explore.files) {
-                FileNodeCard(node)
+                FileNodeCard(
+                    node = node,
+                    busy = busy,
+                    sessionKey = sessionKey,
+                    onAuthForRead = { onAuthForFile(node) },
+                )
             }
         }
         if (explore.notes.isNotEmpty()) {
@@ -836,9 +934,23 @@ private fun ExplorerSection(explore: ApplicationExploreResult) {
 }
 
 @Composable
-private fun FileNodeCard(node: FileNode) {
-    var expanded by rememberSaveable(node.fileNo) { mutableStateOf(false) }
+private fun FileNodeCard(
+    node: FileNode,
+    busy: Boolean,
+    sessionKey: Int?,
+    onAuthForRead: () -> Unit,
+) {
+    var expanded by rememberSaveable(node.fileNo) { mutableStateOf(node.dataHex != null) }
     val s = node.settings
+    val rights = s.accessRights
+    val canRead = rights.canReadWith(sessionKey)
+    val readPlan = remember(node.fileNo, rights, sessionKey) {
+        AuthKeyPlanner.plan(AuthIntent.ReadFile(node.fileNo, rights), sessionKey)
+    }
+    val needsAuthForRead = node.dataHex == null &&
+        readPlan.barrier == AuthBarrier.NEEDS_KEY
+    val neverRead = readPlan.barrier == AuthBarrier.NEVER
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -859,8 +971,8 @@ private fun FileNodeCard(node: FileNode) {
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "R=${s.accessRights.readLabel} · W=${s.accessRights.writeLabel} · " +
-                            "RW=${s.accessRights.readWriteLabel} · Ch=${s.accessRights.changeLabel}",
+                        text = "R=${rights.readLabel} · W=${rights.writeLabel} · " +
+                            "RW=${rights.readWriteLabel} · Ch=${rights.changeLabel}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -868,6 +980,26 @@ private fun FileNodeCard(node: FileNode) {
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                     contentDescription = null,
+                )
+            }
+            if (needsAuthForRead) {
+                val keysLabel = readPlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
+                TextButton(
+                    onClick = onAuthForRead,
+                    enabled = !busy,
+                ) {
+                    Text(
+                        stringResource(
+                            R.string.card_file_auth_to_read,
+                            keysLabel.ifEmpty { "?" },
+                        ),
+                    )
+                }
+            } else if (neverRead && node.dataHex == null) {
+                Text(
+                    text = stringResource(R.string.card_file_read_never),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
             AnimatedVisibility(visible = expanded) {
@@ -892,6 +1024,13 @@ private fun FileNodeCard(node: FileNode) {
                                 text = dataError,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        canRead -> {
+                            Text(
+                                text = stringResource(R.string.card_file_no_data),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         else -> {

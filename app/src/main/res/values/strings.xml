@@ -72,6 +72,10 @@
     <string name="card_auth_from_hex">Saisie hex</string>
     <string name="card_auth_save_vault">Enregistrer dans le coffre après auth OK</string>
     <string name="card_auth_vault_empty_hint">Coffre vide — saisis l’hex (option enregistrer) ou gère le coffre depuis l’accueil.</string>
+    <string name="card_auth_keys_show_all">Afficher tous les slots 0–13…</string>
+    <string name="card_auth_keys_candidates_only">Slots utiles seulement</string>
+    <string name="card_file_auth_to_read">Authentifier pour lire (%1$s)…</string>
+    <string name="card_file_read_never">Lecture interdite (Never)</string>
     <string name="card_get_card_uid">Lire UID réel (GetCardUID)</string>
 
     <!-- Coffre-fort -->

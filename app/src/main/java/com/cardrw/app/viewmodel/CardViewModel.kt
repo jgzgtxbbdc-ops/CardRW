@@ -17,7 +17,12 @@ import com.cardrw.desfire.client.DesfireTransportException
 import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.model.Aid
 import com.cardrw.desfire.model.ApplicationExploreResult
+import com.cardrw.desfire.model.AuthBarrier
+import com.cardrw.desfire.model.AuthIntent
+import com.cardrw.desfire.model.AuthKeyPlan
+import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.CardIdentity
+import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.session.AuthSession
 import com.cardrw.desfire.util.Hex
@@ -101,6 +106,56 @@ class CardViewModel @Inject constructor(
 
     fun reloadVault() {
         viewModelScope.launch { keyVault.load() }
+    }
+
+    /**
+     * Plan d’auth pour la sheet (U3) selon moniteur courant.
+     * Priorité : premier fichier non lisible avec session → structure free-list → générique.
+     */
+    fun suggestAuthPlan(): AuthKeyPlan {
+        val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+        val explore = _ui.value.explore
+        if (explore != null && !explore.aid.isPicc) {
+            val unread = explore.files.firstOrNull { node ->
+                node.dataHex == null &&
+                    !node.settings.accessRights.canReadWith(sessionKey) &&
+                    !(node.settings.accessRights.isReadNever &&
+                        (node.settings.accessRights.readWrite and 0x0F) == 0x0F)
+            }
+            if (unread != null) {
+                return AuthKeyPlanner.plan(
+                    AuthIntent.ReadFile(unread.fileNo, unread.settings.accessRights),
+                    currentSessionKey = sessionKey,
+                )
+            }
+            val freeList = explore.keySettings?.bits?.freeDirectoryListWithoutMaster
+            if (explore.files.isEmpty() && freeList == false) {
+                return AuthKeyPlanner.plan(
+                    AuthIntent.ExploreStructure(false),
+                    currentSessionKey = sessionKey,
+                )
+            }
+            if (explore.files.isEmpty() && explore.keySettings == null) {
+                return AuthKeyPlanner.plan(
+                    AuthIntent.ExploreStructure(null),
+                    currentSessionKey = sessionKey,
+                )
+            }
+        } else if (explore == null && _ui.value.selectedAidHex != null) {
+            return AuthKeyPlanner.plan(
+                AuthIntent.ExploreStructure(null),
+                currentSessionKey = sessionKey,
+            )
+        }
+        return AuthKeyPlanner.plan(AuthIntent.Generic, currentSessionKey = sessionKey)
+    }
+
+    fun authPlanForFile(node: FileNode): AuthKeyPlan {
+        val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+        return AuthKeyPlanner.plan(
+            AuthIntent.ReadFile(node.fileNo, node.settings.accessRights),
+            currentSessionKey = sessionKey,
+        )
     }
 
     fun onTagDiscovered(tag: Tag) {

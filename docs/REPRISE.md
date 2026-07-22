@@ -18,7 +18,7 @@
 | **FACTORY_KEY** copie défensive | ✅ `51a6d52` — voir contrat ci-dessous |
 | **prepareCommand** en-têtes clairs (prêt Write/ChangeKey) | ✅ `51a6d52` — voir contrat ci-dessous |
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
-| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0–U2 ✅** — U3→U5 à faire |
+| **v0.6 UX** moniteur diagnostic écran Carte | 🔄 **U0–U3 ✅** — U4→U5 à faire |
 | **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | Décision EV2 avant écritures massives | ⬜ à trancher (parc cartes) |
@@ -33,8 +33,8 @@
 | **U0** | Spec 4 principes + découpage | ✅ |
 | **U1** | Pull auto post-select / post-auth ; Explorer → Actualiser | ✅ |
 | **U2** | Auth en bottom sheet ; session sticky | ✅ |
-| **U3** | Clés candidates selon intention / droits | ⬜ **prochaine** (ou K1–K2 coffre) |
-| **U4** | Arbre PICC super-nœud ; fichiers sous apps | ⬜ |
+| **U3** | Clés candidates selon intention / droits | ✅ |
+| **U4** | Arbre PICC super-nœud ; fichiers sous apps | ⬜ **prochaine** |
 | **U5** | GetCardUID auto, preview hex, polish | ⬜ |
 
 **Principes (rappel) :** (1) afficher dès que lisible (2) scroll = info, saisie = fenêtre (3) arbre DESFire (4) demander la/les clés capables de l’op.
@@ -137,14 +137,15 @@ NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
   FACTORY_KEY + prepareCommand(clearHeaderLength) livrés (51a6d52)
-  v0.6 UX : U0–U2 ✅ ; prochaine U3 candidates ou U4 arbre
-  Coffre : K0–K2 ✅ (EncryptedPrefs + screen + sheet dropdown/save)
+  v0.6 UX : U0–U3 ✅ ; prochaine U4 arbre PICC
+  Coffre : K0–K2 ✅ ; NFC app-wide ✅
+  AuthKeyPlanner (Read/Write/Structure/Generic) + sheet slots utiles
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
 Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 
 Prochaine tâche (une seule par session) :
-  A) U3 clés candidates selon intention (UX_ECRAN_CARTE.md) — recommandé
-  B) U4 arbre PICC → apps → fichiers
+  A) U4 arbre PICC → apps → fichiers (UX_ECRAN_CARTE.md) — recommandé
+  B) U5 polish (GetCardUID auto, preview hex)
   C) Arbitrage SM EV2 avant Write (parc)
   D) v1 WriteData — urgence seulement
 Ne pas committer clés prod / dumps réels / local.properties
@@ -156,13 +157,13 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — U3** : clés candidates (R/W/RW) dans la sheet.  
-   - **B — U4** : arbre PICC super-nœud ; fichiers sous apps.  
+   - **A — U4** : arbre PICC super-nœud ; fichiers sous apps.  
+   - **B — U5** : GetCardUID auto, preview hex, polish.  
    - **C — EV2** : tester refus AES EV1 (`0xAA`) avant writes massifs.  
    - **D — v1 Write** : header=7 ; carte sacrifiable.  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : **U3 puis U4** pour finir le moniteur ; Write après.
+Avis fil rouge : **U4** pour finir le moniteur ; Write après.
 
 ---
 

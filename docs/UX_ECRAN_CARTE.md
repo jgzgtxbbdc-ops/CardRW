@@ -168,7 +168,7 @@ Option labo opt-in éventuelle : hors scope U1–U4.
 | **U0** | Cette spec + REPRISE + renvoi CDC | Docs mergees | Nul |
 | **U1** | Pull auto post-select et post-auth ; bouton → « Actualiser » | ✅ 2026-07-22 — select/auth → `runExplore` ; CTA Actualiser | Faible |
 | **U2** | Auth en bottom sheet ; panneau retiré du scroll ; barre session | ✅ 2026-07-22 — ModalBottomSheet + AuthSessionBar sticky | Moyen |
-| **U3** | `keysFor(intent)` ; candidates ; Free/Never ; CTA nœud | Sheet propose les n° utiles quand settings connus | Moyen |
+| **U3** | `keysFor(intent)` ; candidates ; Free/Never ; CTA nœud | ✅ 2026-07-22 — AuthKeyPlanner + sheet slots + CTA fichier | Moyen |
 | **U4** | Arbre PICC super-nœud ; fichiers sous apps ; style plein/pointillé | Plus de PICC « comme une app » ; fichiers imbriqués | Élevé |
 | **U5** | GetCardUID auto ; preview hex ; restore scroll ; légende accès | Polish terrain | Faible |
 
