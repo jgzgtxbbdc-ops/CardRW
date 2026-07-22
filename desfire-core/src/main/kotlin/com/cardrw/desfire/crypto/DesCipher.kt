@@ -69,10 +69,10 @@ object DesCipher {
     }
 
     /**
-     * SEND (legacy DESFire) : ciphertext = ENC(plaintext ⊕ IV) ; IV ← ciphertext.
-     * Aligné freefare `mifare_cypher_blocks_chained` MCD_SEND / MCO_ENCYPHER.
+     * SEND AES-style (ENCYPHER) : ciphertext = ENC(plaintext ⊕ IV) ; IV ← ciphertext.
+     * **Pas** utilisé pour AuthenticateDES (0x0A) — voir [cbcSendLegacyDecrypt].
      */
-    fun cbcSend(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
+    fun cbcSendEncrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         require(iv.size == BLOCK && data.size % BLOCK == 0)
         var offset = 0
         while (offset < data.size) {
@@ -88,7 +88,27 @@ object DesCipher {
     }
 
     /**
-     * RECV : plaintext = DEC(ciphertext) ⊕ IV ; IV ← ciphertext.
+     * SEND freefare MCD_SEND + MCO_DECYPHER (autres flux legacy).
+     * AuthenticateDES blank NXP terrain utilise [cbcSendEncrypt] à la place.
+     */
+    fun cbcSendLegacyDecrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
+        require(iv.size == BLOCK && data.size % BLOCK == 0)
+        var offset = 0
+        while (offset < data.size) {
+            for (i in 0 until BLOCK) {
+                data[offset + i] = (data[offset + i].toInt() xor iv[i].toInt()).toByte()
+            }
+            val dec = decryptBlock(key, data.copyOfRange(offset, offset + BLOCK))
+            dec.copyInto(data, offset)
+            dec.copyInto(iv)
+            offset += BLOCK
+        }
+        return data
+    }
+
+    /**
+     * RECV legacy / freefare MCD_RECEIVE + MCO_DECYPHER :
+     * plaintext = DEC(ciphertext) ⊕ IV ; IV ← ciphertext.
      */
     fun cbcReceive(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
         require(iv.size == BLOCK && data.size % BLOCK == 0)
@@ -104,6 +124,10 @@ object DesCipher {
         }
         return data
     }
+
+    /** @deprecated utiliser [cbcSendLegacyDecrypt] pour auth DES */
+    fun cbcSend(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray =
+        cbcSendLegacyDecrypt(key, iv, data)
 
     fun zeroIv(): ByteArray = ByteArray(BLOCK)
 

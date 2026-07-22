@@ -353,10 +353,10 @@ class DesfireClient(
         require(keyNo in 0..13) { "keyNo hors plage 0–13: $keyNo" }
 
         session = null
-        val iv = DesCipher.zeroIv()
         val block = DesCipher.BLOCK
 
         // 1) 0A + keyNo → ek(RndB) 8 o + AF
+        // freefare AS_LEGACY : IV remis à 0 à chaque appel cypher (pas d’enchaînement inter-étapes)
         val step1 = exchange(DesfireCommand.AUTHENTICATE_DES, byteArrayOf(keyNo.toByte()))
         if (!step1.isAdditionalFrame) {
             throw DesfireProtocolException(
@@ -370,8 +370,10 @@ class DesfireClient(
                 step1,
             )
         }
+        // AS_LEGACY : IV = 0 à **chaque** étape (pas d’enchaînement inter-commandes).
+        // Capture terrain blank NXP : SEND = ENCYPHER CBC, RECV = DECYPHER CBC.
         val rndB = step1.data.copyOf()
-        DesCipher.cbcReceive(key, iv, rndB)
+        DesCipher.cbcReceive(key, DesCipher.zeroIv(), rndB)
 
         val hostRndA = rndA?.also {
             require(it.size == block) { "RndA DES doit faire $block octets" }
@@ -379,7 +381,7 @@ class DesfireClient(
 
         val rndBRot = DesCipher.rotateLeft(rndB)
         val token = hostRndA + rndBRot
-        DesCipher.cbcSend(key, iv, token)
+        DesCipher.cbcSendEncrypt(key, DesCipher.zeroIv(), token)
 
         // 2) AF + ek(RndA||RndB') → ek(RndA') + 00
         val step2 = exchange(DesfireCommand.ADDITIONAL_FRAME, token)
@@ -396,11 +398,12 @@ class DesfireClient(
             )
         }
         val rndAPrime = step2.data.copyOf()
-        DesCipher.cbcReceive(key, iv, rndAPrime)
+        DesCipher.cbcReceive(key, DesCipher.zeroIv(), rndAPrime)
         val expected = DesCipher.rotateLeft(hostRndA)
         if (!rndAPrime.contentEquals(expected)) {
             throw DesfireProtocolException(
-                "AuthenticateDES: RndA' ne correspond pas — clé DES incorrecte.",
+                "AuthenticateDES: RndA' ne correspond pas — clé DES incorrecte " +
+                    "(attendu ${Hex.encode(expected)}, obtenu ${Hex.encode(rndAPrime)}).",
             )
         }
 

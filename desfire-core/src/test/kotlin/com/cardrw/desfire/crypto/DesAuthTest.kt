@@ -59,12 +59,14 @@ class DesAuthTest {
         }
     }
 
+    /**
+     * Simule PICC DES blank NXP : SEND=ENCYPHER CBC, RECV=DECYPHER CBC, IV=0 chaque étape.
+     */
     private class SimulatedDesCard(
         private val key: ByteArray,
         private val rndB: ByteArray,
     ) : DesfireTransceiver {
         private var step = 0
-        private val iv = DesCipher.zeroIv()
 
         override fun transceive(apdu: ByteArray): ByteArray {
             val cmd = apdu[1].toInt() and 0xFF
@@ -77,22 +79,24 @@ class DesAuthTest {
             return when {
                 cmd == 0x0A && step == 0 -> {
                     step = 1
-                    for (i in iv.indices) iv[i] = 0
                     val ek = rndB.copyOf()
-                    DesCipher.cbcSend(key, iv, ek)
+                    DesCipher.cbcSendEncrypt(key, DesCipher.zeroIv(), ek)
                     ek + byteArrayOf(0x91.toByte(), 0xAF.toByte())
                 }
                 cmd == 0xAF && step == 1 -> {
                     step = 2
                     val token = data.copyOf()
                     require(token.size == 16)
-                    DesCipher.cbcReceive(key, iv, token)
+                    DesCipher.cbcReceive(key, DesCipher.zeroIv(), token)
                     val gotRndA = token.copyOfRange(0, 8)
                     val gotRndBRot = token.copyOfRange(8, 16)
-                    check(gotRndBRot.contentEquals(DesCipher.rotateLeft(rndB)))
+                    check(gotRndBRot.contentEquals(DesCipher.rotateLeft(rndB))) {
+                        "bad RndB' ${Hex.encode(gotRndBRot)}"
+                    }
                     val rndAPrime = DesCipher.rotateLeft(gotRndA)
-                    DesCipher.cbcSend(key, iv, rndAPrime)
-                    rndAPrime + byteArrayOf(0x91.toByte(), 0x00)
+                    val ek = rndAPrime.copyOf()
+                    DesCipher.cbcSendEncrypt(key, DesCipher.zeroIv(), ek)
+                    ek + byteArrayOf(0x91.toByte(), 0x00)
                 }
                 else -> error("Unexpected DES APDU step=$step cmd=${cmd.toString(16)}")
             }
