@@ -80,8 +80,8 @@ enum class CardPhase {
 }
 
 /**
- * Dernière auth AES réussie pour un AID (session carte courante uniquement).
- * Permet de re-sélectionner une app sans re-saisir le matériau (Select invalide la SM).
+ * Auth AES réussie mémorisée pour un slot carte (session VM uniquement).
+ * Plusieurs slots peuvent coexister par AID (ex. clé 2 lecture F0/F1, clé 3 lecture F2).
  */
 data class RememberedAppAuth(
     val keyNo: Int,
@@ -113,10 +113,14 @@ class CardViewModel @Inject constructor(
     private var liveUid: ByteArray? = null
 
     /**
-     * Mémoire session : AID uppercase → dernière clé OK.
-     * Pas de persistance disque (labo : secret uniquement tant que la carte reste « en session » VM).
+     * Mémoire session multi-clés : AID uppercase → (keyNo → matériau).
+     * SelectApplication invalide la SM carte ; on rejoue les clés déjà validées
+     * et on **conserve** les données fichier déjà lues sous une autre session.
      */
-    private val rememberedAuthByAid = mutableMapOf<String, RememberedAppAuth>()
+    private val rememberedKeysByAid = mutableMapOf<String, MutableMap<Int, RememberedAppAuth>>()
+
+    /** Dernier keyNo OK par AID (préférence re-select). */
+    private val lastKeyNoByAid = mutableMapOf<String, Int>()
 
     init {
         viewModelScope.launch { keyVault.load() }
@@ -192,6 +196,27 @@ class CardViewModel @Inject constructor(
             AuthIntent.ReadFile(node.fileNo, node.settings.accessRights),
             currentSessionKey = sessionKey,
         )
+    }
+
+    /**
+     * CTA fichier : si une clé candidate est déjà mémorisée pour l’AID, re-auth auto
+     * sans sheet ni re-saisie. Retourne true si l’auto-auth a démarré.
+     */
+    fun tryAuthFileWithRemembered(node: FileNode): Boolean {
+        val aidHex = _ui.value.selectedAidHex ?: return false
+        val plan = authPlanForFile(node)
+        if (plan.barrier != AuthBarrier.NEEDS_KEY) return false
+        val remembered = rememberedKeysByAid[aidHex.uppercase()] ?: return false
+        val prefer = plan.preferKeyNo
+        val keyNo = when {
+            prefer != null && remembered.containsKey(prefer) -> prefer
+            else -> plan.candidates.map { it.keyNo }.firstOrNull { remembered.containsKey(it) }
+        } ?: return false
+        val entry = remembered[keyNo] ?: return false
+        viewModelScope.launch {
+            silentAuthThenExplore(aidHex, entry, flashMessage = REMEMBERED_AUTH_OK_MESSAGE)
+        }
+        return true
     }
 
     fun onTagDiscovered(tag: Tag) {
@@ -289,10 +314,8 @@ class CardViewModel @Inject constructor(
                     syncJournal()
                     when {
                         tryDefaultAuth -> tryDefaultAuthThenExplore(aidHex)
-                        // Select invalide la SM : rejouer la dernière clé OK pour cet AID
-                        rememberedAuthByAid.containsKey(cacheKey) ->
-                            tryRememberedAuthThenExplore(aidHex)
-                        else -> runExplore(aidHex)
+                        hasRememberedKeys(cacheKey) -> tryRememberedAuthThenExplore(aidHex)
+                        else -> runExplore(aidHex, fillRemembered = true)
                     }
                 },
                 onFailure = { e -> handleOpFailure(e, selectedAidHex = aidHex) },
@@ -303,7 +326,7 @@ class CardViewModel @Inject constructor(
     /**
      * Authentifie avec la **clé par défaut labo** : slot carte n°0 + matériau usine `00…00`.
      * Succès → flash UI + mémorisation pour re-select.
-     * Échec → si une clé était déjà mémorisée pour l’AID, la tenter ; sinon sheet auth.
+     * Échec → si des clés étaient déjà mémorisées pour l’AID, les tenter ; sinon sheet auth.
      */
     private suspend fun tryDefaultAuthThenExplore(aidHex: String) {
         val keyNo = DEFAULT_AUTH_KEY_NO
@@ -336,13 +359,12 @@ class CardViewModel @Inject constructor(
                     )
                 }
                 syncJournal()
-                runExplore(aidHex)
+                runExplore(aidHex, fillRemembered = true)
                 showAuthSuccessFlash(DEFAULT_AUTH_OK_MESSAGE)
             },
             onFailure = {
                 syncJournal()
-                // Usine refusée : retomber sur la clé déjà validée pour cet AID si dispo
-                if (rememberedAuthByAid.containsKey(aidHex.uppercase())) {
+                if (hasRememberedKeys(aidHex)) {
                     tryRememberedAuthThenExplore(aidHex)
                 } else {
                     _ui.update {
@@ -353,26 +375,67 @@ class CardViewModel @Inject constructor(
                             openAuthSheetNonce = it.openAuthSheetNonce + 1,
                         )
                     }
-                    runExplore(aidHex)
+                    runExplore(aidHex, fillRemembered = false)
                 }
             },
         )
     }
 
     /**
-     * Rejoue la dernière auth réussie pour [aidHex] (sans sheet ni re-saisie).
-     * Échec → oubli de l’entrée + explore partiel (l’utilisateur peut ré-ouvrir la sheet).
+     * Rejoue la dernière clé OK pour [aidHex], puis complète les fichiers encore vides
+     * avec les **autres** clés mémorisées (multi-droits R/W).
      */
     private suspend fun tryRememberedAuthThenExplore(aidHex: String) {
-        val remembered = rememberedAuthByAid[aidHex.uppercase()] ?: run {
-            runExplore(aidHex)
+        val preferred = preferredRemembered(aidHex)
+        if (preferred == null) {
+            runExplore(aidHex, fillRemembered = true)
             return
         }
+        val ok = silentAuthThenExplore(
+            aidHex = aidHex,
+            remembered = preferred,
+            flashMessage = REMEMBERED_AUTH_OK_MESSAGE,
+            fillRemembered = true,
+        )
+        if (!ok) {
+            forgetKey(aidHex, preferred.keyNo)
+            // Essayer une autre clé mémorisée
+            val fallback = preferredRemembered(aidHex)
+            if (fallback != null) {
+                silentAuthThenExplore(
+                    aidHex = aidHex,
+                    remembered = fallback,
+                    flashMessage = REMEMBERED_AUTH_OK_MESSAGE,
+                    fillRemembered = true,
+                )
+            } else {
+                _ui.update {
+                    it.copy(
+                        authSession = null,
+                        errorMessage = null,
+                        statusLine = "Clé mémorisée refusée — authentifie à nouveau.",
+                    )
+                }
+                runExplore(aidHex, fillRemembered = false)
+            }
+        }
+    }
+
+    /**
+     * Auth silencieuse avec matériau mémorisé → explore (+ option fill multi-clés).
+     * @return true si auth OK
+     */
+    private suspend fun silentAuthThenExplore(
+        aidHex: String,
+        remembered: RememberedAppAuth,
+        flashMessage: String?,
+        fillRemembered: Boolean = true,
+    ): Boolean {
         val keyNo = remembered.keyNo
         val keyBytes: ByteArray = try {
             resolveRememberedMaterial(remembered)
         } catch (e: Exception) {
-            forgetAuth(aidHex)
+            forgetKey(aidHex, keyNo)
             _ui.update {
                 it.copy(
                     busy = false,
@@ -380,8 +443,7 @@ class CardViewModel @Inject constructor(
                     statusLine = null,
                 )
             }
-            runExplore(aidHex)
-            return
+            return false
         }
 
         _ui.update {
@@ -400,9 +462,8 @@ class CardViewModel @Inject constructor(
                 client.authSession
             }
         }
-        result.fold(
+        return result.fold(
             onSuccess = { session ->
-                // Rafraîchir la copie session (vault a pu changer)
                 rememberAuth(aidHex, keyNo, keyBytes, remembered.vaultEntryId)
                 _ui.update {
                     it.copy(
@@ -412,21 +473,15 @@ class CardViewModel @Inject constructor(
                     )
                 }
                 syncJournal()
-                runExplore(aidHex)
-                showAuthSuccessFlash(REMEMBERED_AUTH_OK_MESSAGE)
+                runExplore(aidHex, fillRemembered = fillRemembered)
+                if (flashMessage != null) showAuthSuccessFlash(flashMessage)
+                true
             },
             onFailure = {
-                // Clé plus valide sur la carte → ne pas spammer ; oublier et laisser l’UI sans session
-                forgetAuth(aidHex)
+                forgetKey(aidHex, keyNo)
                 syncJournal()
-                _ui.update {
-                    it.copy(
-                        authSession = null,
-                        errorMessage = null,
-                        statusLine = "Clé mémorisée refusée — authentifie à nouveau.",
-                    )
-                }
-                runExplore(aidHex)
+                _ui.update { it.copy(busy = false) }
+                false
             },
         )
     }
@@ -437,7 +492,6 @@ class CardViewModel @Inject constructor(
             return try {
                 keyVault.material(vaultId)
             } catch (_: Exception) {
-                // Entrée coffre absente : repli sur la copie session
                 remembered.copyMaterial()
             }
         }
@@ -450,30 +504,136 @@ class CardViewModel @Inject constructor(
         keyBytes: ByteArray,
         vaultEntryId: String?,
     ) {
-        val key = aidHex.uppercase()
-        rememberedAuthByAid[key]?.keyBytes?.fill(0)
-        rememberedAuthByAid[key] = RememberedAppAuth(
-            keyNo = keyNo.coerceIn(0, 13),
+        val aidKey = aidHex.uppercase()
+        val slot = keyNo.coerceIn(0, 13)
+        val map = rememberedKeysByAid.getOrPut(aidKey) { mutableMapOf() }
+        map[slot]?.keyBytes?.fill(0)
+        map[slot] = RememberedAppAuth(
+            keyNo = slot,
             vaultEntryId = vaultEntryId,
             keyBytes = keyBytes.copyOf(),
         )
-        // Prefill sheet pour un futur « Changer de clé »
+        lastKeyNoByAid[aidKey] = slot
         _ui.update {
             it.copy(
-                keyNo = keyNo.coerceIn(0, 13),
+                keyNo = slot,
                 keyHex = Hex.encode(keyBytes),
             )
         }
     }
 
-    private fun forgetAuth(aidHex: String) {
-        val removed = rememberedAuthByAid.remove(aidHex.uppercase())
-        removed?.keyBytes?.fill(0)
+    private fun hasRememberedKeys(aidHex: String): Boolean =
+        rememberedKeysByAid[aidHex.uppercase()]?.isNotEmpty() == true
+
+    private fun preferredRemembered(aidHex: String): RememberedAppAuth? {
+        val aidKey = aidHex.uppercase()
+        val map = rememberedKeysByAid[aidKey] ?: return null
+        if (map.isEmpty()) return null
+        val last = lastKeyNoByAid[aidKey]
+        if (last != null) map[last]?.let { return it }
+        // Préférer une clé non-maître de lecture si seule 0 est structure
+        return map.values.maxByOrNull { it.keyNo } // n° plus élevé souvent lecture ; fallback any
+            ?: map.values.firstOrNull()
+    }
+
+    private fun forgetKey(aidHex: String, keyNo: Int) {
+        val aidKey = aidHex.uppercase()
+        val map = rememberedKeysByAid[aidKey] ?: return
+        map.remove(keyNo)?.keyBytes?.fill(0)
+        if (map.isEmpty()) {
+            rememberedKeysByAid.remove(aidKey)
+            lastKeyNoByAid.remove(aidKey)
+        } else if (lastKeyNoByAid[aidKey] == keyNo) {
+            lastKeyNoByAid[aidKey] = map.keys.first()
+        }
     }
 
     private fun clearRememberedAuth() {
-        rememberedAuthByAid.values.forEach { it.keyBytes.fill(0) }
-        rememberedAuthByAid.clear()
+        rememberedKeysByAid.values.forEach { map ->
+            map.values.forEach { it.keyBytes.fill(0) }
+            map.clear()
+        }
+        rememberedKeysByAid.clear()
+        lastKeyNoByAid.clear()
+    }
+
+    /**
+     * Après une explore partielle : pour chaque fichier encore non lu, si une clé
+     * mémorisée peut le lire, bascule auto sur cette clé et re-lit (sans sheet).
+     * Les contenus déjà obtenus sous d’autres sessions restent via [mergeExplorePreserveData].
+     */
+    private suspend fun fillUnreadWithRememberedKeys(aidHex: String) {
+        val aidKey = aidHex.uppercase()
+        val keys = rememberedKeysByAid[aidKey] ?: return
+        if (keys.isEmpty()) return
+
+        var guard = 0
+        while (guard++ < 8) {
+            val explore = _ui.value.explore
+                ?.takeIf { it.aidHex.equals(aidHex, ignoreCase = true) }
+                ?: break
+            val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+            val unread = explore.files.filter { node ->
+                node.dataHex == null &&
+                    node.settings.fileType == com.cardrw.desfire.model.FileType.STANDARD &&
+                    !node.settings.accessRights.isReadNever
+            }
+            if (unread.isEmpty()) break
+
+            // Choisir une clé mémorisée capable de lire au moins un fichier non lu
+            val nextKeyNo = unread.asSequence()
+                .flatMap { node ->
+                    keys.keys.asSequence().filter { k ->
+                        node.settings.accessRights.canReadWith(k)
+                    }
+                }
+                .distinct()
+                .firstOrNull { it != sessionKey }
+                ?: break
+
+            val entry = keys[nextKeyNo] ?: break
+            _ui.update {
+                it.copy(statusLine = "Lecture auto (clé n°$nextKeyNo)…")
+            }
+            val ok = silentAuthThenExplore(
+                aidHex = aidHex,
+                remembered = entry,
+                flashMessage = null,
+                fillRemembered = false, // on gère la boucle ici
+            )
+            if (!ok) {
+                // déjà oubliée dans silentAuthThenExplore
+                continue
+            }
+        }
+    }
+
+    /**
+     * Conserve le hex déjà lu sous une session précédente quand la session courante
+     * n’a pas le droit de re-lire (ex. clé 3 après lecture clé 2).
+     */
+    private fun mergeExplorePreserveData(
+        previous: ApplicationExploreResult?,
+        fresh: ApplicationExploreResult,
+    ): ApplicationExploreResult {
+        if (previous == null || !previous.aidHex.equals(fresh.aidHex, ignoreCase = true)) {
+            return fresh
+        }
+        val prevByNo = previous.files.associateBy { it.fileNo }
+        val mergedFiles = fresh.files.map { node ->
+            val prev = prevByNo[node.fileNo]
+            when {
+                node.dataHex != null -> node
+                prev?.dataHex != null ->
+                    node.copy(dataHex = prev.dataHex, dataError = null)
+                else -> node
+            }
+        }
+        return fresh.copy(
+            keySettings = fresh.keySettings ?: previous.keySettings,
+            files = mergedFiles,
+            structureFromCache = fresh.structureFromCache || previous.structureFromCache,
+        )
     }
 
     private fun showAuthSuccessFlash(message: String) {
@@ -561,7 +721,7 @@ class CardViewModel @Inject constructor(
                             vaultNote = "Auth OK — coffre : ${e.message}"
                         }
                     }
-                    // Mémoriser pour re-select app sans re-saisie (session carte)
+                    // Mémoriser ce slot (multi-clés par AID) pour re-select / fill auto
                     rememberAuth(aidHex, resolvedKeyNo, keyBytes, resolvedVaultId)
                     _ui.update {
                         it.copy(
@@ -571,7 +731,7 @@ class CardViewModel @Inject constructor(
                         )
                     }
                     syncJournal()
-                    runExplore(aidHex)
+                    runExplore(aidHex, fillRemembered = true)
                     showAuthSuccessFlash(MANUAL_AUTH_OK_MESSAGE)
                 },
                 onFailure = { e -> handleOpFailure(e) },
@@ -587,19 +747,24 @@ class CardViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            runExplore(aidHex)
+            runExplore(aidHex, fillRemembered = true)
         }
     }
 
     /**
      * GetKeySettings / FileIDs / FileSettings / ReadData selon droits de session.
-     * Appelé après select, après auth, ou via [explore] (Actualiser).
+     * Fusionne avec le cache pour **ne pas effacer** les données déjà lues sous une autre clé.
+     *
+     * @param fillRemembered si true, enchaîne les clés mémorisées pour les fichiers encore vides.
      */
-    private suspend fun runExplore(aidHex: String) {
-        // Cache structure du même AID (workflow clé 0 structure → clé lecture données)
+    private suspend fun runExplore(aidHex: String, fillRemembered: Boolean = true) {
+        val cacheKey = aidHex.uppercase()
+        // Préférer l’état UI courant, sinon cache multi-AID
         val prev = _ui.value.explore
+            ?.takeIf { it.aidHex.equals(aidHex, ignoreCase = true) }
+            ?: _ui.value.exploreByAid[cacheKey]
         val cachedSettings =
-            if (prev != null && prev.aidHex.equals(aidHex, ignoreCase = true) && prev.files.isNotEmpty()) {
+            if (prev != null && prev.files.isNotEmpty()) {
                 prev.fileSettings
             } else {
                 null
@@ -622,16 +787,16 @@ class CardViewModel @Inject constructor(
                     readStandardFiles = true,
                     cachedFileSettings = cachedSettings,
                 )
-                // Fusionner key settings du cache si mode lecture seule
-                val merged = if (exploreResult.structureFromCache &&
+                val withKs = if (exploreResult.structureFromCache &&
                     exploreResult.keySettings == null &&
-                    prev?.keySettings != null &&
-                    prev.aidHex.equals(aidHex, ignoreCase = true)
+                    prev?.keySettings != null
                 ) {
                     exploreResult.copy(keySettings = prev.keySettings)
                 } else {
                     exploreResult
                 }
+                // Conserves dataHex déjà obtenus sous une autre session (clé 2 puis clé 3…)
+                val merged = mergeExplorePreserveData(prev, withKs)
                 merged to client.authSession
             }
         }
@@ -649,17 +814,19 @@ class CardViewModel @Inject constructor(
                     else -> "Exploration : $fileCount fichier(s) · $readable lu(s)"
                 }
                 _ui.update {
-                    val key = aidHex.uppercase()
                     it.copy(
                         busy = false,
                         explore = exploreResult,
-                        exploreByAid = it.exploreByAid + (key to exploreResult),
+                        exploreByAid = it.exploreByAid + (cacheKey to exploreResult),
                         authSession = session,
                         statusLine = summary,
                         errorMessage = null,
                     )
                 }
                 syncJournal()
+                if (fillRemembered) {
+                    fillUnreadWithRememberedKeys(aidHex)
+                }
             },
             onFailure = { e -> handleOpFailure(e) },
         )

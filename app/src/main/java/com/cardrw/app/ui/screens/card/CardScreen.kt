@@ -340,7 +340,10 @@ private fun ReadyMonitor(
                 },
                 onRefresh = { viewModel.explore() },
                 onAuthForFile = { node ->
-                    openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
+                    // Clé déjà mémorisée pour ce droit → re-auth auto, pas de sheet
+                    if (!viewModel.tryAuthFileWithRemembered(node)) {
+                        openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
+                    }
                 },
             )
 
