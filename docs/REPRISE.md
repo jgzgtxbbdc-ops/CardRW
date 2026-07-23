@@ -178,9 +178,8 @@ Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 - AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) Auth auto **par intention / nœud** (clé 2 lecture vs 0 structure selon CTA)
-  B) Dumps / export structure
-  C) K3 biométrie coffre — non prioritaire
+  A) Dumps / export structure
+  B) K3 biométrie coffre — non prioritaire
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -190,12 +189,11 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — Auth auto fine** : selon nœud / intention (R vs master), flash droits R/W/RW.  
-   - **B — Dumps** export arbre / hex.  
-   - **C — K3** biométrie coffre (optionnel).  
+   - **A — Dumps** export arbre / hex.  
+   - **B — K3** biométrie coffre (optionnel).  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : auto-auth **select + structure** livré ; peaufiner **par nœud fichier**.
+Avis fil rouge : auth auto **select + structure + intention fichier** livrés ; dumps ensuite.
 
 ---
 
@@ -213,11 +211,10 @@ Avis fil rouge : auto-auth **select + structure** livré ; peaufiner **par nœud
 
 ## Dettes notées — moniteur / auth
 
-- **Auth auto par intention** (prioritaire produit) : au clic fichier / CTA, choisir le slot
-  candidat (R vs W vs master) mémorisé ou usine, flash « clé n°X · droits R/W/RW » ;
-  ne pas toujours forcer clé 0 au select app si une clé lecture suffit pour le contexte.
-- CTA fichier / fill multi-clés : déjà partiel (`tryAuthFileWithRemembered`, fill usine) — unifier
-  avec la philo « zéro re-saisie ».
+- Auth auto par intention **livré** (Read/Write CTA, flash rôle, `pendingWriteFileNo`) —
+  terrain multi-clés (ex. R=2 W=0) à valider.
+- Select app force encore usine 0 si aucune mémorisée — OK labo ; peaufiner « clé lecture
+  si structure en cache » plus tard si besoin.
 
 ## Dettes notées (crypto / dettes code)
 

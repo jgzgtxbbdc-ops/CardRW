@@ -401,8 +401,14 @@ private fun FileTreeNode(
     val needsAuthForRead = node.dataHex == null && readPlan.barrier == AuthBarrier.NEEDS_KEY
     val neverRead = readPlan.barrier == AuthBarrier.NEVER
     val dataHex = node.dataHex
-    val canWrite = structureEnabled &&
+    val writePlan = remember(node.fileNo, rights, sessionKey) {
+        AuthKeyPlanner.plan(AuthIntent.WriteFile(node.fileNo, rights), sessionKey)
+    }
+    val canWriteNow = structureEnabled &&
         (rights.isWriteFree || rights.canWriteWith(sessionKey))
+    // Afficher « Écrire… » aussi si une auth W/RW peut débloquer (intention auto)
+    val showWriteCta = structureEnabled && writePlan.barrier != AuthBarrier.NEVER &&
+        (canWriteNow || writePlan.barrier == AuthBarrier.NEEDS_KEY)
     // Plein = contenu lu, Free, Never (état final), ou erreur connue
     val complete = dataHex != null ||
         neverRead ||
@@ -434,7 +440,14 @@ private fun FileTreeNode(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .clickable {
+                    if (needsAuthForRead && !busy) {
+                        // Tap nœud lacunaire = auth lecture (intention Read)
+                        onAuthForRead()
+                    } else {
+                        expanded = !expanded
+                    }
+                }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -519,12 +532,19 @@ private fun FileTreeNode(
                         modifier = Modifier.padding(horizontal = 8.dp),
                     )
                 }
-                if (canWrite) {
+                if (showWriteCta) {
+                    val writeKeys = writePlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
                     TextButton(
                         onClick = onWrite,
                         enabled = !busy,
                     ) {
-                        Text(stringResource(R.string.card_file_write_action))
+                        Text(
+                            if (canWriteNow || writeKeys.isEmpty()) {
+                                stringResource(R.string.card_file_write_action)
+                            } else {
+                                stringResource(R.string.card_file_write_auth_action, writeKeys)
+                            },
+                        )
                     }
                 }
                 if (structureEnabled) {

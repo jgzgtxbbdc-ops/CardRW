@@ -73,6 +73,14 @@ data class CardUiState(
      */
     val openAuthSheetNonce: Long = 0L,
     /**
+     * Plan à présenter dans la sheet (lecture / écriture / générique) quand l’auto-auth échoue.
+     */
+    val pendingAuthPlan: AuthKeyPlan? = null,
+    /**
+     * Ouvrir la sheet Write une fois la session d’écriture prête (auth auto intention Write).
+     */
+    val pendingWriteFileNo: Int? = null,
+    /**
      * Proposition d’enregistrer le matériau hex malgré un échec d’auth
      * (ex. bon secret, mauvais slot carte). Non null → dialog UI.
      */
@@ -223,59 +231,153 @@ class CardViewModel @Inject constructor(
         )
     }
 
+    fun authPlanForWrite(node: FileNode): AuthKeyPlan {
+        val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+        return AuthKeyPlanner.plan(
+            AuthIntent.WriteFile(node.fileNo, node.settings.accessRights),
+            currentSessionKey = sessionKey,
+        )
+    }
+
+    fun consumePendingWriteFile() {
+        _ui.update { it.copy(pendingWriteFileNo = null) }
+    }
+
+    fun consumePendingAuthPlan() {
+        _ui.update { it.copy(pendingAuthPlan = null) }
+    }
+
     /**
-     * CTA fichier : re-auth auto si possible —
-     * 1) clé mémorisée pour un slot candidat
-     * 2) sinon **clé standard usine** (00…00) sur le slot préféré / candidat
-     * Retourne true si l’auto-auth a démarré (pas de sheet).
+     * CTA **lecture** fichier : auth auto selon intention Read
+     * (candidats R/RW, mémorisée puis usine). True = auto lancée / déjà OK (pas de sheet).
      */
     fun tryAuthFileWithRemembered(node: FileNode): Boolean {
         val aidHex = _ui.value.selectedAidHex ?: return false
         val plan = authPlanForFile(node)
-        if (plan.barrier != AuthBarrier.NEEDS_KEY) return false
+        return when (plan.barrier) {
+            AuthBarrier.NONE -> true // session déjà suffisante
+            AuthBarrier.NEVER -> false
+            AuthBarrier.NEEDS_KEY -> {
+                viewModelScope.launch {
+                    val ok = autoAuthForPlan(
+                        aidHex = aidHex,
+                        plan = plan,
+                        intentLabel = "lire F${node.fileNo}",
+                    )
+                    if (!ok) {
+                        _ui.update {
+                            it.copy(
+                                statusLine = "Auth lecture F${node.fileNo} — saisie manuelle.",
+                                openAuthSheetNonce = it.openAuthSheetNonce + 1,
+                                pendingAuthPlan = plan,
+                            )
+                        }
+                    }
+                }
+                true
+            }
+        }
+    }
+
+    /**
+     * CTA **écriture** fichier : si session OK → [CardUiState.pendingWriteFileNo] ;
+     * sinon auth auto sur candidats W/RW puis ouvrir le sheet.
+     * @return true si l’UI ne doit pas ouvrir la sheet auth manuelle tout de suite
+     */
+    fun requestWriteFile(node: FileNode): Boolean {
+        val aidHex = _ui.value.selectedAidHex ?: return false
+        val plan = authPlanForWrite(node)
+        return when (plan.barrier) {
+            AuthBarrier.NEVER -> {
+                _ui.update {
+                    it.copy(errorMessage = plan.detailMessage ?: "Écriture impossible sur ce fichier.")
+                }
+                true
+            }
+            AuthBarrier.NONE -> {
+                _ui.update { it.copy(pendingWriteFileNo = node.fileNo, errorMessage = null) }
+                true
+            }
+            AuthBarrier.NEEDS_KEY -> {
+                viewModelScope.launch {
+                    val ok = autoAuthForPlan(
+                        aidHex = aidHex,
+                        plan = plan,
+                        intentLabel = "écrire F${node.fileNo}",
+                    )
+                    if (ok) {
+                        _ui.update {
+                            it.copy(pendingWriteFileNo = node.fileNo, errorMessage = null)
+                        }
+                    } else {
+                        _ui.update {
+                            it.copy(
+                                statusLine = "Auth écriture F${node.fileNo} — saisie manuelle.",
+                                openAuthSheetNonce = it.openAuthSheetNonce + 1,
+                                pendingAuthPlan = plan,
+                            )
+                        }
+                    }
+                }
+                true
+            }
+        }
+    }
+
+    /**
+     * Auth auto pour un [AuthKeyPlan] d’intention (Read / Write / Structure) :
+     * mémorisée sur slots candidats (prefer d’abord), puis usine sur ces slots.
+     */
+    private suspend fun autoAuthForPlan(
+        aidHex: String,
+        plan: AuthKeyPlan,
+        intentLabel: String,
+    ): Boolean {
         val aidKey = aidHex.uppercase()
-        val remembered = rememberedKeysByAid[aidKey].orEmpty()
-        val prefer = plan.preferKeyNo
         val candidateNos = buildList {
-            prefer?.let { add(it) }
+            plan.preferKeyNo?.let { add(it) }
             plan.candidates.forEach { add(it.keyNo) }
         }.distinct()
+        if (candidateNos.isEmpty()) return false
 
-        // 1) Matériau déjà validé pour ce slot
-        val memKeyNo = candidateNos.firstOrNull { remembered.containsKey(it) }
-        if (memKeyNo != null) {
-            val entry = remembered[memKeyNo] ?: return false
-            viewModelScope.launch {
-                silentAuthThenExplore(
-                    aidHex,
-                    entry,
-                    flashMessage = authFlashMessage(aidHex, memKeyNo, "mémorisée"),
-                )
-            }
-            return true
+        val remembered = rememberedKeysByAid[aidKey].orEmpty()
+        for (keyNo in candidateNos) {
+            val entry = remembered[keyNo] ?: continue
+            val role = plan.candidates.find { it.keyNo == keyNo }?.roleLabel
+            val ok = silentAuthThenExplore(
+                aidHex = aidHex,
+                remembered = entry,
+                flashMessage = authFlashMessage(
+                    aidHex = aidHex,
+                    keyNo = keyNo,
+                    source = "mémorisée",
+                    roleLabel = role,
+                    intentLabel = intentLabel,
+                ),
+                fillRemembered = true,
+            )
+            if (ok) return true
         }
 
-        // 2) Clé standard usine sur un slot candidat pas encore raté
         val failedFactory = factoryFailedSlotsByAid[aidKey].orEmpty()
-        val factoryKeyNo = candidateNos.firstOrNull { it !in failedFactory } ?: return false
-        viewModelScope.launch {
+        for (keyNo in candidateNos) {
+            if (keyNo in failedFactory) continue
+            val role = plan.candidates.find { it.keyNo == keyNo }?.roleLabel
             val ok = tryFactoryAuthThenExplore(
                 aidHex = aidHex,
-                keyNo = factoryKeyNo,
-                flashMessage = authFlashMessage(aidHex, factoryKeyNo, "usine"),
+                keyNo = keyNo,
+                flashMessage = authFlashMessage(
+                    aidHex = aidHex,
+                    keyNo = keyNo,
+                    source = "usine",
+                    roleLabel = role,
+                    intentLabel = intentLabel,
+                ),
                 fillAfter = true,
             )
-            if (!ok) {
-                // Laisser l’UI proposer la sheet (nonce) pour saisie manuelle
-                _ui.update {
-                    it.copy(
-                        statusLine = "Clé standard refusée (n°$factoryKeyNo) — saisie manuelle.",
-                        openAuthSheetNonce = it.openAuthSheetNonce + 1,
-                    )
-                }
-            }
+            if (ok) return true
         }
-        return true
+        return false
     }
 
     fun onTagDiscovered(tag: Tag) {
@@ -483,16 +585,25 @@ class CardViewModel @Inject constructor(
         )
     }
 
-    /** Message flash auth : scope + n° clé + droits typiques. */
-    private fun authFlashMessage(aidHex: String, keyNo: Int, source: String): String {
+    /**
+     * Message flash auth : scope + n° clé + rôle intention (Read/Write/…) + source.
+     */
+    private fun authFlashMessage(
+        aidHex: String,
+        keyNo: Int,
+        source: String,
+        roleLabel: String? = null,
+        intentLabel: String? = null,
+    ): String {
         val isPicc = aidHex.equals("000000", ignoreCase = true)
         val scope = if (isPicc) "PICC" else "app ${aidHex.uppercase()}"
-        val rights = when {
-            keyNo == 0 && isPicc -> "master · structure / Format / Create app"
-            keyNo == 0 -> "master app · structure / Create fichier"
-            else -> "clé n°$keyNo · R/W selon fichiers"
+        val rights = roleLabel ?: when {
+            keyNo == 0 && isPicc -> "master · structure / Format / Create"
+            keyNo == 0 -> "master app · structure"
+            else -> "droits selon fichiers"
         }
-        return "Auth auto · $scope · clé n°$keyNo ($source) · $rights"
+        val intent = intentLabel?.let { " · $it" }.orEmpty()
+        return "Auth auto · $scope · clé n°$keyNo ($source)$intent · $rights"
     }
 
     /**

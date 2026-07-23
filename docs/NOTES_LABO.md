@@ -117,7 +117,7 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **ChangeKey DES→AES** PICC vierge (`prepareChangeKeyDesToAes` + sheet moniteur)
 - [x] **FormatPICC** `0xFC` (master PICC AES, confirmation UI)
 - [x] **Auto-auth moniteur** — select = auth mémorisée/usine + flash ; Create/Format re-auth PICC ; AID suivant
-- [ ] **Auth auto par intention / nœud** — clé R vs master selon fichier/CTA ; unifier flash droits
+- [x] **Auth auto par intention / nœud** — Read/Write CTA → candidats R|W|RW mémorisés/usine + flash rôle
 - [ ] Dumps / export structure
 
 **Philo moniteur :** ne pas redemander une op déjà OK en session (clés, structure PICC, suggestions AID/FileNo).

@@ -253,11 +253,20 @@ private fun ReadyMonitor(
         if (showAuthSheet) viewModel.reloadVault()
     }
 
-    // Échec auto-auth (double-tap) → sheet standard, sans message d’erreur
+    // Échec auto-auth → sheet (plan intention si fourni, sinon générique)
     LaunchedEffect(ui.openAuthSheetNonce) {
         if (ui.openAuthSheetNonce > 0L) {
-            openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
+            val plan = ui.pendingAuthPlan ?: viewModel.suggestAuthPlan()
+            openAuthSheet(plan, forceGenericIfNone = ui.pendingAuthPlan == null)
+            viewModel.consumePendingAuthPlan()
         }
+    }
+
+    // Write : ouvrir sheet une fois session écriture prête
+    LaunchedEffect(ui.pendingWriteFileNo) {
+        val no = ui.pendingWriteFileNo ?: return@LaunchedEffect
+        writeFileNo = no
+        viewModel.consumePendingWriteFile()
     }
 
     // Ferme la sheet après auth OK (explore auto U1 peut encore tourner : on ferme dès session OK + !busy auth phase)
@@ -391,7 +400,9 @@ private fun ReadyMonitor(
                         openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
                     }
                 },
-                onWriteFile = { node -> writeFileNo = node.fileNo },
+                onWriteFile = { node ->
+                    viewModel.requestWriteFile(node)
+                },
                 onAddApplication = { showCreateApp = true },
                 onUpgradePiccToAes = { showUpgradeAes = true },
                 onFormatPicc = { showFormatPicc = true },

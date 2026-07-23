@@ -88,6 +88,7 @@
     <string name="card_tree_add_file">Ajouter un fichier…</string>
     <string name="card_tree_delete_app">Supprimer l’app…</string>
     <string name="card_file_write_action">Écrire…</string>
+    <string name="card_file_write_auth_action">Écrire (clé %1$s)…</string>
     <string name="card_file_delete_action">Supprimer…</string>
     <string name="card_write_sheet_title">Écrire le fichier %1$d</string>
     <string name="card_write_sheet_current">Contenu actuel (sur la carte)</string>
