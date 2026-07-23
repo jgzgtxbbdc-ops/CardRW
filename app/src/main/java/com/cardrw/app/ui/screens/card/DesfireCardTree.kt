@@ -507,15 +507,17 @@ private fun FileTreeNode(
             modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(
+            // Colonne pleine largeur : évite le libellé « Écrire » coupé verticalement
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (needsAuthForRead) {
                     val keysLabel = readPlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
                     TextButton(
                         onClick = onAuthForRead,
                         enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
                             stringResource(
@@ -537,6 +539,7 @@ private fun FileTreeNode(
                     TextButton(
                         onClick = onWrite,
                         enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
                             if (canWriteNow || writeKeys.isEmpty()) {
@@ -551,6 +554,7 @@ private fun FileTreeNode(
                     TextButton(
                         onClick = onDelete,
                         enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(stringResource(R.string.card_file_delete_action))
                     }

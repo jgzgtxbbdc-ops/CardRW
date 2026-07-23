@@ -538,18 +538,26 @@ class DesfireClient(
                     // enchaîne DES usine si pertinent
                 }
             }
-            if (isAllZeroKey(key) && shouldFallbackToDesFactory(e)) {
+            // DES usine 0x0A : **uniquement** master PICC (carte vierge). Jamais sur
+            // une app AES (slots 1/2…) — sinon spam 0xAE + authentifications inutiles.
+            if (isAllZeroKey(key) &&
+                keyNo == 0 &&
+                isPiccAidHex(aidHex) &&
+                shouldFallbackToDesFactory(e)
+            ) {
                 return authenticateDes(
                     keyNo = keyNo,
                     key = DesConstants.FACTORY_2KTDEA_KEY,
                     aidHex = aidHex,
-                    // RndA DES = 8 o : dériver des 8 premiers du rndA AES optionnel
                     rndA = rndA?.copyOf(DesCipher.BLOCK),
                 )
             }
             throw e
         }
     }
+
+    private fun isPiccAidHex(aidHex: String): Boolean =
+        aidHex.replace(" ", "").equals("000000", ignoreCase = true)
 
     private fun isAllZeroKey(key: ByteArray): Boolean = key.all { it == 0.toByte() }
 

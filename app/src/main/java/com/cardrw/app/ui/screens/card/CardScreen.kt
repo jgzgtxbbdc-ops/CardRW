@@ -255,10 +255,14 @@ private fun ReadyMonitor(
     }
 
     // Échec auto-auth → sheet (plan intention si fourni, sinon générique)
-    LaunchedEffect(ui.openAuthSheetNonce) {
+    LaunchedEffect(ui.openAuthSheetNonce, ui.pendingAuthPlan) {
         if (ui.openAuthSheetNonce > 0L) {
             val plan = ui.pendingAuthPlan ?: viewModel.suggestAuthPlan()
-            openAuthSheet(plan, forceGenericIfNone = ui.pendingAuthPlan == null)
+            // forceGeneric only if vraiment pas de plan d’intention
+            openAuthSheet(
+                plan = plan,
+                forceGenericIfNone = plan.candidates.isEmpty() && plan.allowAnyKey,
+            )
             viewModel.consumePendingAuthPlan()
         }
     }

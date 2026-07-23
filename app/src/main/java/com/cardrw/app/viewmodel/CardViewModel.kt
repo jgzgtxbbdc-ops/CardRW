@@ -800,7 +800,7 @@ class CardViewModel @Inject constructor(
             onFailure = {
                 forgetKey(aidHex, keyNo)
                 syncJournal()
-                _ui.update { it.copy(busy = false) }
+                _ui.update { it.copy(busy = false, authSession = null) }
                 false
             },
         )
@@ -911,18 +911,38 @@ class CardViewModel @Inject constructor(
     }
 
     /**
-     * Phase 2 : tenter la **clé standard** (usine 00…00) sur les slots encore utiles.
-     * Silencieux si refus (carte re-encodée) — pas de sheet spam.
+     * Phase 2 : clé standard 00…00 **seulement** si la carte ressemble au labo usine.
+     *
+     * Important : chaque tentative d’auth **détruit** la session client (AES start).
+     * On snapshot la session courante et on la **restaure** en fin de fill pour
+     * ne pas laisser l’UI « clé 0 » alors que le client n’a plus de session
+     * (WriteData → 0xAE).
+     *
+     * Slots R/W (1, 2…) : uniquement si master 0 a déjà été validé avec 00…00
+     * sur cet AID (sinon spam 0xAE sur cartes à clés non nulles).
      */
     private suspend fun fillWithFactoryKey(aidHex: String) {
         val aidKey = aidHex.uppercase()
         val failed = factoryFailedSlotsByAid.getOrPut(aidKey) { mutableSetOf() }
+        val sessionBefore = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+        val restore = sessionBefore?.let { rememberedKeysByAid[aidKey]?.get(it) }
+            ?: preferredRemembered(aidHex)
+
+        var masterIsFactoryZero = rememberedKeysByAid[aidKey]?.get(0)?.keyBytes
+            ?.all { it == 0.toByte() } == true
+
         var guard = 0
         while (guard++ < 8) {
             val known = rememberedKeysByAid[aidKey]?.keys.orEmpty()
             val nextKeyNo = nextSlotNeedingAuth(aidHex, preferKnown = null)
                 ?.takeUnless { it in known || it in failed }
                 ?: break
+
+            if (nextKeyNo != 0 && !masterIsFactoryZero) {
+                // Carte non-usine : ne pas probe les slots fichier avec 00…00
+                failed += nextKeyNo
+                continue
+            }
 
             _ui.update {
                 it.copy(statusLine = "Auth auto clé standard (n°$nextKeyNo)…")
@@ -935,12 +955,34 @@ class CardViewModel @Inject constructor(
             )
             if (!ok) {
                 failed += nextKeyNo
+                // Auth a clear la session client — UI doit le refléter jusqu’à restore
+                _ui.update { it.copy(authSession = null) }
                 continue
             }
-            // Succès : flash sobre une seule fois si lecture avancée
+            if (nextKeyNo == 0) {
+                masterIsFactoryZero = true
+            }
             if (guard == 1) {
                 showAuthSuccessFlash(authFlashMessage(aidHex, nextKeyNo, "usine"))
             }
+        }
+
+        // Restaurer la session d’avant le fill (souvent master 0 pour Write)
+        val current = _ui.value.authSession?.keyNumber
+        if (restore != null && current != restore.keyNo) {
+            silentAuthThenExplore(
+                aidHex = aidHex,
+                remembered = restore,
+                flashMessage = null,
+                fillRemembered = false,
+            )
+        } else if (restore != null && current == null) {
+            silentAuthThenExplore(
+                aidHex = aidHex,
+                remembered = restore,
+                flashMessage = null,
+                fillRemembered = false,
+            )
         }
     }
 
@@ -1376,8 +1418,49 @@ class CardViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
+            val aidHex = _ui.value.selectedAidHex
+            if (aidHex == null) {
+                _ui.update {
+                    it.copy(busy = false, errorMessage = "Aucune application sélectionnée.")
+                }
+                return@launch
+            }
             val settings = _ui.value.explore?.files?.find { it.fileNo == fileNo }?.settings
+            // Session peut avoir basculé (fill lecture clé R) : re-auth intention Write si besoin
+            if (settings != null) {
+                val plan = AuthKeyPlanner.plan(
+                    AuthIntent.WriteFile(fileNo, settings.accessRights),
+                    _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber,
+                )
+                if (plan.barrier == AuthBarrier.NEVER) {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            errorMessage = plan.detailMessage ?: "Écriture interdite sur ce fichier.",
+                        )
+                    }
+                    return@launch
+                }
+                if (plan.barrier == AuthBarrier.NEEDS_KEY) {
+                    val ok = autoAuthForPlan(
+                        aidHex = aidHex,
+                        plan = plan,
+                        intentLabel = "écrire F$fileNo",
+                    )
+                    if (!ok) {
+                        _ui.update {
+                            it.copy(
+                                busy = false,
+                                errorMessage = "Auth écriture requise (W/RW) avant WriteData.",
+                                openAuthSheetNonce = it.openAuthSheetNonce + 1,
+                                pendingAuthPlan = plan,
+                            )
+                        }
+                        return@launch
+                    }
+                }
+            }
+            val sessionKey = _ui.value.authSession?.takeIf { it.authenticated }?.keyNumber
             val fileSize = settings?.sizeBytes
             var padNote = ""
             if (padToFileSize && fileSize != null) {
@@ -1409,6 +1492,14 @@ class CardViewModel @Inject constructor(
             }
             val result = withContext(Dispatchers.IO) {
                 withLiveClient { client ->
+                    // ensure = no-op si déjà sur l’AID (ne pas re-Select : invaliderait la SM)
+                    client.ensureApplicationSelected(Aid.fromHex(aidHex))
+                    if (client.session == null) {
+                        throw DesfireProtocolException(
+                            "WriteData : session perdue (re-auth auto a échoué ou probe usine). " +
+                                "Ré-authentifie la clé d’écriture (W/RW) puis réessaie.",
+                        )
+                    }
                     client.writeData(fileNo, bytes, offset = 0, commMode = mode)
                 }
             }
