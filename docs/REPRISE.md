@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-23 (FormatPICC)  
+**Dernière mise à jour :** 2026-07-23 (auto-auth moniteur)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — FormatPICC labo  
+**Commit :** (voir `git log -1`) — auth auto select + re-auth structure  
 **Branche :** `main` = `origin/main`
 
 ---

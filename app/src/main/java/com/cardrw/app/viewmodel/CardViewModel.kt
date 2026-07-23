@@ -15,6 +15,7 @@ import com.cardrw.desfire.client.DesfireClient
 import com.cardrw.desfire.client.DesfireProtocolException
 import com.cardrw.desfire.client.DesfireTransportException
 import com.cardrw.desfire.crypto.AesConstants
+import com.cardrw.desfire.crypto.SecureMessagingLevel
 import com.cardrw.desfire.model.Aid
 import com.cardrw.desfire.model.ApplicationExploreResult
 import com.cardrw.desfire.model.AuthBarrier
@@ -245,7 +246,11 @@ class CardViewModel @Inject constructor(
         if (memKeyNo != null) {
             val entry = remembered[memKeyNo] ?: return false
             viewModelScope.launch {
-                silentAuthThenExplore(aidHex, entry, flashMessage = REMEMBERED_AUTH_OK_MESSAGE)
+                silentAuthThenExplore(
+                    aidHex,
+                    entry,
+                    flashMessage = authFlashMessage(aidHex, memKeyNo, "mémorisée"),
+                )
             }
             return true
         }
@@ -257,7 +262,7 @@ class CardViewModel @Inject constructor(
             val ok = tryFactoryAuthThenExplore(
                 aidHex = aidHex,
                 keyNo = factoryKeyNo,
-                flashMessage = DEFAULT_AUTH_OK_MESSAGE,
+                flashMessage = authFlashMessage(aidHex, factoryKeyNo, "usine"),
                 fillAfter = true,
             )
             if (!ok) {
@@ -328,11 +333,14 @@ class CardViewModel @Inject constructor(
     }
 
     /**
-     * SelectApplication puis **pull auto** du directory (U1 / moniteur diagnostic).
-     * L’auth est invalidée par le select côté client.
+     * SelectApplication puis **auth auto** + pull directory (philosophie moniteur).
      *
-     * @param tryDefaultAuth double-tap : tente clé par défaut (slot 0 + usine 00…00) ;
-     *   succès → flash UI ; échec silencieux → explore puis sheet auth standard.
+     * Select invalide toujours la SM carte : on rejoue sans saisie
+     * 1) clé mémorisée pour l’AID
+     * 2) clé usine slot 0
+     * 3) explore sans auth si (1)(2) échouent
+     *
+     * @param tryDefaultAuth conservé (double-tap = forcer usine d’abord, même logique)
      */
     fun selectApplication(aidHex: String, tryDefaultAuth: Boolean = false) {
         viewModelScope.launch {
@@ -366,11 +374,11 @@ class CardViewModel @Inject constructor(
                         )
                     }
                     syncJournal()
-                    when {
-                        tryDefaultAuth -> tryDefaultAuthThenExplore(aidHex)
-                        hasRememberedKeys(cacheKey) -> tryRememberedAuthThenExplore(aidHex)
-                        else -> runExplore(aidHex, fillRemembered = true)
-                    }
+                    // Toujours tenter une auth auto (mémorisée → usine) — pas de double-tap obligatoire
+                    autoAuthThenExplore(
+                        aidHex = aidHex,
+                        preferFactoryFirst = tryDefaultAuth,
+                    )
                 },
                 onFailure = { e -> handleOpFailure(e, selectedAidHex = aidHex) },
             )
@@ -378,101 +386,184 @@ class CardViewModel @Inject constructor(
     }
 
     /**
-     * Authentifie avec la **clé par défaut labo** : slot carte n°0 + matériau usine `00…00`.
-     * Succès → flash UI + mémorisation pour re-select.
-     * Échec → si des clés étaient déjà mémorisées pour l’AID, les tenter ; sinon sheet auth.
+     * Prochain AID labo libre (hex 6) à partir des apps déjà sur la carte.
+     * Plages : F00101…F001FF, puis F00201…, etc.
      */
-    private suspend fun tryDefaultAuthThenExplore(aidHex: String) {
-        val keyNo = DEFAULT_AUTH_KEY_NO
-        val keyBytes = AesConstants.FACTORY_KEY.copyOf()
-        val keyHex = Hex.encode(keyBytes)
+    fun suggestNextAidHex(): String {
+        val used = _ui.value.identity?.applications
+            ?.map { it.hex.uppercase() }
+            ?.toSet()
+            .orEmpty()
+        for (base in LAB_AID_BASES) {
+            for (n in 1..0xFF) {
+                val candidate = "%06X".format(base + n)
+                if (candidate !in used) return candidate
+            }
+        }
+        return "F00101"
+    }
+
+    /**
+     * Auth auto post-select : mémorisée ↔ usine (ordre selon [preferFactoryFirst]).
+     * Flash pédagogique avec scope + clé + droits.
+     */
+    private suspend fun autoAuthThenExplore(
+        aidHex: String,
+        preferFactoryFirst: Boolean = false,
+    ) {
+        if (preferFactoryFirst) {
+            if (tryFactoryAuthThenExplore(
+                    aidHex = aidHex,
+                    keyNo = DEFAULT_AUTH_KEY_NO,
+                    flashMessage = authFlashMessage(aidHex, DEFAULT_AUTH_KEY_NO, "usine"),
+                    fillAfter = true,
+                )
+            ) {
+                return
+            }
+            if (tryRememberedAuthThenExplore(aidHex)) return
+            openAuthSheetAfterAutoFail(aidHex)
+            runExplore(aidHex, fillRemembered = false)
+            return
+        }
+        if (tryRememberedAuthThenExplore(aidHex)) return
+        if (tryFactoryAuthThenExplore(
+                aidHex = aidHex,
+                keyNo = DEFAULT_AUTH_KEY_NO,
+                flashMessage = authFlashMessage(aidHex, DEFAULT_AUTH_KEY_NO, "usine"),
+                fillAfter = true,
+            )
+        ) {
+            return
+        }
+        // Free-list / explore sans auth si possible ; sheet si free-list bloquée
+        runExplore(aidHex, fillRemembered = false)
+        val explore = _ui.value.explore
+        val freeListBlocked = explore?.notes?.any {
+            it.contains("free-list", ignoreCase = true) ||
+                it.contains("Authentication", ignoreCase = true) ||
+                it.contains("0xAE", ignoreCase = true)
+        } == true
+        if (freeListBlocked && !aidHex.equals("000000", ignoreCase = true)) {
+            openAuthSheetAfterAutoFail(aidHex)
+        }
+    }
+
+    private fun openAuthSheetAfterAutoFail(aidHex: String) {
         _ui.update {
             it.copy(
-                keyNo = keyNo,
-                keyHex = keyHex,
-                busy = true,
+                authSession = null,
                 errorMessage = null,
-                statusLine = "Auth clé par défaut (n°$keyNo, usine)…",
+                statusLine = null,
+                openAuthSheetNonce = it.openAuthSheetNonce + 1,
             )
         }
+    }
+
+    /**
+     * Rejoue la dernière clé OK pour [aidHex], puis fill multi-clés.
+     * @return true si au moins une auth mémorisée a réussi
+     */
+    private suspend fun tryRememberedAuthThenExplore(aidHex: String): Boolean {
+        val preferred = preferredRemembered(aidHex) ?: return false
+        val ok = silentAuthThenExplore(
+            aidHex = aidHex,
+            remembered = preferred,
+            flashMessage = authFlashMessage(aidHex, preferred.keyNo, source = "mémorisée"),
+            fillRemembered = true,
+        )
+        if (ok) return true
+        forgetKey(aidHex, preferred.keyNo)
+        val fallback = preferredRemembered(aidHex) ?: return false
+        return silentAuthThenExplore(
+            aidHex = aidHex,
+            remembered = fallback,
+            flashMessage = authFlashMessage(aidHex, fallback.keyNo, source = "mémorisée"),
+            fillRemembered = true,
+        )
+    }
+
+    /** Message flash auth : scope + n° clé + droits typiques. */
+    private fun authFlashMessage(aidHex: String, keyNo: Int, source: String): String {
+        val isPicc = aidHex.equals("000000", ignoreCase = true)
+        val scope = if (isPicc) "PICC" else "app ${aidHex.uppercase()}"
+        val rights = when {
+            keyNo == 0 && isPicc -> "master · structure / Format / Create app"
+            keyNo == 0 -> "master app · structure / Create fichier"
+            else -> "clé n°$keyNo · R/W selon fichiers"
+        }
+        return "Auth auto · $scope · clé n°$keyNo ($source) · $rights"
+    }
+
+    /**
+     * Garantit une session AES master PICC (clé 0) pour Create / Format / Delete app.
+     * Rejoue mémorisée ou usine sans saisie.
+     */
+    private suspend fun ensurePiccMasterAesSession(): Boolean {
+        val sess = _ui.value.authSession
+        if (sess?.authenticated == true &&
+            sess.aidHex.equals("000000", ignoreCase = true) &&
+            sess.keyNumber == 0 &&
+            sess.smLevel != SecureMessagingLevel.DES_LEGACY &&
+            sess.smLevel != SecureMessagingLevel.NONE
+        ) {
+            return true
+        }
+        _ui.update {
+            it.copy(
+                busy = true,
+                errorMessage = null,
+                statusLine = "Auth auto PICC master (structure)…",
+                selectedAidHex = "000000",
+            )
+        }
+        // Mémorisée PICC clé 0
+        val remembered = rememberedKeysByAid["000000"]?.get(0)
+        if (remembered != null) {
+            val ok = silentAuthThenExplore(
+                aidHex = "000000",
+                remembered = remembered,
+                flashMessage = authFlashMessage("000000", 0, "mémorisée"),
+                fillRemembered = false,
+            )
+            if (ok) return true
+        }
+        // Usine
+        val keyBytes = AesConstants.FACTORY_KEY.copyOf()
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
-                client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                client.authenticateAesPreferEv1(keyNo, keyBytes, aidHex)
+                client.ensureApplicationSelected(Aid.PICC)
+                client.authenticateAesPreferEv1(0, keyBytes, "000000")
                 client.authSession
             }
         }
-        result.fold(
+        return result.fold(
             onSuccess = { session ->
-                rememberAuth(aidHex, keyNo, keyBytes, vaultEntryId = null)
+                rememberAuth("000000", 0, keyBytes, vaultEntryId = null)
                 _ui.update {
                     it.copy(
                         authSession = session,
+                        selectedAidHex = "000000",
                         errorMessage = null,
                         statusLine = null,
                     )
                 }
                 syncJournal()
-                runExplore(aidHex, fillRemembered = true)
-                showAuthSuccessFlash(DEFAULT_AUTH_OK_MESSAGE)
+                showAuthSuccessFlash(authFlashMessage("000000", 0, "usine"))
+                true
             },
-            onFailure = {
+            onFailure = { e ->
                 syncJournal()
-                if (hasRememberedKeys(aidHex)) {
-                    tryRememberedAuthThenExplore(aidHex)
-                } else {
-                    _ui.update {
-                        it.copy(
-                            authSession = null,
-                            errorMessage = null,
-                            statusLine = null,
-                            openAuthSheetNonce = it.openAuthSheetNonce + 1,
-                        )
-                    }
-                    runExplore(aidHex, fillRemembered = false)
-                }
-            },
-        )
-    }
-
-    /**
-     * Rejoue la dernière clé OK pour [aidHex], puis complète les fichiers encore vides
-     * avec les **autres** clés mémorisées (multi-droits R/W).
-     */
-    private suspend fun tryRememberedAuthThenExplore(aidHex: String) {
-        val preferred = preferredRemembered(aidHex)
-        if (preferred == null) {
-            runExplore(aidHex, fillRemembered = true)
-            return
-        }
-        val ok = silentAuthThenExplore(
-            aidHex = aidHex,
-            remembered = preferred,
-            flashMessage = REMEMBERED_AUTH_OK_MESSAGE,
-            fillRemembered = true,
-        )
-        if (!ok) {
-            forgetKey(aidHex, preferred.keyNo)
-            // Essayer une autre clé mémorisée
-            val fallback = preferredRemembered(aidHex)
-            if (fallback != null) {
-                silentAuthThenExplore(
-                    aidHex = aidHex,
-                    remembered = fallback,
-                    flashMessage = REMEMBERED_AUTH_OK_MESSAGE,
-                    fillRemembered = true,
-                )
-            } else {
                 _ui.update {
                     it.copy(
+                        busy = false,
                         authSession = null,
-                        errorMessage = null,
-                        statusLine = "Clé mémorisée refusée — authentifie à nouveau.",
+                        errorMessage = "Auth PICC master requise : ${e.message}",
                     )
                 }
-                runExplore(aidHex, fillRemembered = false)
-            }
-        }
+                false
+            },
+        )
     }
 
     /**
@@ -673,7 +764,7 @@ class CardViewModel @Inject constructor(
             }
             // Succès : flash sobre une seule fois si lecture avancée
             if (guard == 1) {
-                showAuthSuccessFlash(DEFAULT_AUTH_OK_MESSAGE)
+                showAuthSuccessFlash(authFlashMessage(aidHex, nextKeyNo, "usine"))
             }
         }
     }
@@ -1167,6 +1258,7 @@ class CardViewModel @Inject constructor(
     /** CreateApplication labo (AES, settings ouverts 0x0F). */
     fun createApplicationLab(aidHex: String, maxKeys: Int = 3) {
         viewModelScope.launch {
+            if (!ensurePiccMasterAesSession()) return@launch
             _ui.update {
                 it.copy(busy = true, errorMessage = null, statusLine = "CreateApplication…")
             }
@@ -1184,14 +1276,13 @@ class CardViewModel @Inject constructor(
                 onSuccess = {
                     _ui.update {
                         it.copy(
-                            busy = false,
                             statusLine = "CreateApplication OK — AID ${aidHex.uppercase()}",
                             errorMessage = null,
                         )
                     }
                     syncJournal()
-                    // Re-lire identité pour rafraîchir la liste d’apps
-                    refreshIdentityAfterStructureChange()
+                    // readIdentity → Select PICC invalide la session : re-auth auto
+                    refreshIdentityAfterStructureChange(restorePiccMaster = true)
                 },
                 onFailure = { e -> handleOpFailure(e) },
             )
@@ -1330,6 +1421,7 @@ class CardViewModel @Inject constructor(
      */
     fun formatPiccLab() {
         viewModelScope.launch {
+            if (!ensurePiccMasterAesSession()) return@launch
             _ui.update {
                 it.copy(busy = true, errorMessage = null, statusLine = "FormatPICC…")
             }
@@ -1340,7 +1432,7 @@ class CardViewModel @Inject constructor(
             }
             result.fold(
                 onSuccess = {
-                    // Apps disparues : wipe mémoire session (sauf on peut re-auth PICC)
+                    // Apps disparues : wipe mémoire session (sauf PICC master)
                     rememberedKeysByAid.keys
                         .filter { !it.equals("000000", ignoreCase = true) }
                         .toList()
@@ -1351,7 +1443,6 @@ class CardViewModel @Inject constructor(
                         }
                     _ui.update {
                         it.copy(
-                            busy = false,
                             authSession = null,
                             selectedAidHex = "000000",
                             explore = null,
@@ -1361,7 +1452,7 @@ class CardViewModel @Inject constructor(
                         )
                     }
                     syncJournal()
-                    refreshIdentityAfterStructureChange()
+                    refreshIdentityAfterStructureChange(restorePiccMaster = true)
                 },
                 onFailure = { e -> handleOpFailure(e) },
             )
@@ -1371,6 +1462,7 @@ class CardViewModel @Inject constructor(
     /** DeleteApplication (PICC master AES). */
     fun deleteApplicationLab(aidHex: String) {
         viewModelScope.launch {
+            if (!ensurePiccMasterAesSession()) return@launch
             _ui.update {
                 it.copy(busy = true, errorMessage = null, statusLine = "DeleteApplication…")
             }
@@ -1381,9 +1473,12 @@ class CardViewModel @Inject constructor(
             }
             result.fold(
                 onSuccess = {
+                    rememberedKeysByAid.remove(aidHex.uppercase())?.values?.forEach {
+                        it.keyBytes.fill(0)
+                    }
+                    lastKeyNoByAid.remove(aidHex.uppercase())
                     _ui.update {
                         it.copy(
-                            busy = false,
                             statusLine = "DeleteApplication OK — $aidHex",
                             errorMessage = null,
                             selectedAidHex = if (it.selectedAidHex.equals(aidHex, true)) {
@@ -1395,7 +1490,7 @@ class CardViewModel @Inject constructor(
                         )
                     }
                     syncJournal()
-                    refreshIdentityAfterStructureChange()
+                    refreshIdentityAfterStructureChange(restorePiccMaster = true)
                 },
                 onFailure = { e -> handleOpFailure(e) },
             )
@@ -1430,7 +1525,12 @@ class CardViewModel @Inject constructor(
         }
     }
 
-    private suspend fun refreshIdentityAfterStructureChange() {
+    /**
+     * Relit GetVersion / apps. [readIdentity] fait Select PICC → session morte.
+     * Si [restorePiccMaster], re-auth auto pour enchaîner Create/Format sans saisie.
+     */
+    private suspend fun refreshIdentityAfterStructureChange(restorePiccMaster: Boolean = false) {
+        val statusKeep = _ui.value.statusLine
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
                 val uid = liveUid
@@ -1444,11 +1544,26 @@ class CardViewModel @Inject constructor(
                         identity = identity,
                         exploreByAid = emptyMap(),
                         explore = null,
+                        authSession = null,
+                        statusLine = statusKeep,
                     )
                 }
                 syncJournal()
+                if (restorePiccMaster) {
+                    ensurePiccMasterAesSession()
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            statusLine = statusKeep,
+                        )
+                    }
+                } else {
+                    _ui.update { it.copy(busy = false) }
+                }
             },
-            onFailure = { /* status déjà posé par l’op structure */ },
+            onFailure = {
+                _ui.update { it.copy(busy = false) }
+            },
         )
     }
 
@@ -1671,14 +1786,12 @@ class CardViewModel @Inject constructor(
     }
 
     companion object {
-        /** Slot carte pour auto-auth double-tap (clé maître app / PICC). */
+        /** Slot carte pour auto-auth (clé maître app / PICC). */
         const val DEFAULT_AUTH_KEY_NO = 0
         /** Durée d’affichage du bandeau d’auth réussie. */
-        const val AUTH_SUCCESS_FLASH_MS = 2_500L
-        const val DEFAULT_AUTH_OK_MESSAGE =
-            "Authentification réussie avec la clé par défaut"
+        const val AUTH_SUCCESS_FLASH_MS = 3_200L
         const val MANUAL_AUTH_OK_MESSAGE = "Authentification réussie"
-        /** Re-select app : session restaurée sans re-saisie. */
-        const val REMEMBERED_AUTH_OK_MESSAGE = "Session restaurée (clé mémorisée)"
+        /** Bases AID labo pour [suggestNextAidHex] (F001xx, F002xx, A000xx). */
+        private val LAB_AID_BASES = intArrayOf(0xF00100, 0xF00200, 0xA00000)
     }
 }

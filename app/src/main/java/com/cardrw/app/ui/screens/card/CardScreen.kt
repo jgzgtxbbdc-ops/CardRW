@@ -514,12 +514,15 @@ private fun ReadyMonitor(
 
     if (showCreateApp) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val suggestedAid = viewModel.suggestNextAidHex()
         ModalBottomSheet(
             onDismissRequest = { if (!ui.busy) showCreateApp = false },
             sheetState = sheetState,
         ) {
             CreateAppSheetContent(
+                suggestedAidHex = suggestedAid,
                 busy = ui.busy,
+                statusLine = ui.statusLine,
                 errorMessage = ui.errorMessage,
                 onDismiss = { if (!ui.busy) showCreateApp = false },
                 onCreate = { aid -> viewModel.createApplicationLab(aid) },
@@ -638,11 +641,10 @@ private fun ReadyMonitor(
         )
     }
 
-    // Fermer sheets create après succès (statusLine stable)
+    // Fermer sheet fichier après succès ; Create app reste ouvert (AID suivant auto)
     LaunchedEffect(ui.busy, ui.statusLine, ui.errorMessage) {
         if (!ui.busy && ui.errorMessage == null) {
             when {
-                ui.statusLine?.startsWith("CreateApplication OK") == true -> showCreateApp = false
                 ui.statusLine?.startsWith("CreateStdDataFile OK") == true -> showCreateFile = false
             }
         }
@@ -1330,12 +1332,19 @@ private fun UpgradeAesSheetContent(
 
 @Composable
 private fun CreateAppSheetContent(
+    suggestedAidHex: String,
     busy: Boolean,
+    statusLine: String?,
     errorMessage: String?,
     onDismiss: () -> Unit,
     onCreate: (aidHex: String) -> Unit,
 ) {
-    var aidHex by rememberSaveable { mutableStateOf("F00102") }
+    var aidHex by remember(suggestedAidHex) { mutableStateOf(suggestedAidHex) }
+    // Après Create OK, identity change → suggestion suivante
+    LaunchedEffect(suggestedAidHex) {
+        if (!busy) aidHex = suggestedAidHex
+    }
+    val justCreated = statusLine?.startsWith("CreateApplication OK") == true && !busy
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1361,10 +1370,20 @@ private fun CreateAppSheetContent(
             },
             modifier = Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.card_lab_aid_hex)) },
+            supportingText = {
+                Text(stringResource(R.string.card_create_app_suggest, suggestedAidHex))
+            },
             singleLine = true,
             enabled = !busy,
             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
         )
+        if (justCreated && statusLine != null) {
+            Text(
+                text = statusLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         if (errorMessage != null) {
             Text(errorMessage, color = MaterialTheme.colorScheme.error)
         }

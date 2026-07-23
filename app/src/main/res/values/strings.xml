@@ -94,7 +94,8 @@
     <string name="card_write_sheet_action_full">Écrire (fichier entier)</string>
     <string name="card_write_sheet_action_partial">Écrire %1$d o (partiel)</string>
     <string name="card_create_app_sheet_title">Ajouter une application</string>
-    <string name="card_create_app_sheet_hint">PICC master AES requis. Settings labo ouverts (0x0F), crypto AES.</string>
+    <string name="card_create_app_sheet_hint">PICC master AES (re-auth auto si besoin). Settings labo ouverts (0x0F), crypto AES. L’AID proposé évite les apps déjà présentes.</string>
+    <string name="card_create_app_suggest">Suggestion libre : %1$s</string>
     <string name="card_create_file_sheet_title">Ajouter un fichier</string>
     <string name="card_create_file_sheet_hint">Standard Data, FULL, droits Free (labo). MaxKeys / structure = session maître app.</string>
     <string name="card_create_file_sheet_action">Créer le fichier</string>
