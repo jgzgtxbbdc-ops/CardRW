@@ -4,7 +4,7 @@
 **Portée :** bibliothèque **nommée** de matériaux crypto sur l’appareil  
 **Motivation principale :** ergonomie (noms vs hex 32 car.) — pas la sécu d’entreprise  
 **Sécu :** plafond progressif via `SecretStore` ; biométrie optionnelle plus tard  
-**Liens :** moniteur Carte [`UX_ECRAN_CARTE.md`](UX_ECRAN_CARTE.md) · CDC §6.2 `SecretStore` · anneau §7.3  
+**Liens :** moniteur Carte [`UX_ECRAN_CARTE.md`](UX_ECRAN_CARTE.md) · profils multi-clés [`UX_PROFIL_CLES.md`](UX_PROFIL_CLES.md) · CDC §6.2 `SecretStore` · anneau §7.3  
 
 ---
 

@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-23 (spec P0 profils de clés)  
+**Dernière mise à jour :** 2026-07-23 (fin de session — P0 profils + crypto wipe)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — + `docs/UX_PROFIL_CLES.md` (P0)  
+**Commit :** (voir `git log -1`) — `docs/UX_PROFIL_CLES.md` P0 + renvois CDC/UX  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -203,6 +203,16 @@ Ne pas committer clés prod / dumps réels / local.properties
 - **K4** : reveal hex + copy, export meta sans secrets, suggestion nom `AID · kN · rôle`
 - **Dettes crypto mineures** : wipe session keys, KDoc CMAC IV, golden EV1 auth/Read/Write FULL
 - **P0** : spec profils multi-clés `docs/UX_PROFIL_CLES.md` (coffre ≠ profil ≠ anneau)
+- **Crypto dettes** (autre fil) : `SensitiveBytes` wipe session, KDoc CMAC, golden EV1 auth+ReadData FULL
+
+### Fin de session 2026-07-23 (cette fenêtre)
+
+| Fait | Suivant |
+|---|---|
+| État des lieux + handoff multi-fenêtre | — |
+| Spec **P0** profils / key set (`UX_PROFIL_CLES.md`) | **P1** modèle + écran CRUD bindings |
+| Renvois CDC §6.2.2, coffre, moniteur, REPRISE | **P3** capture « Enregistrer ce jeu » |
+| Pas d’implémentation code profils (spec only) | Puis P2 résolveur moniteur → P4 dump complet |
 
 ---
 

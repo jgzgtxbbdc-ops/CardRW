@@ -2,7 +2,7 @@
 
 **Nom commercial :** CardRW  
 **applicationId :** `com.cardrw.app`  
-**Version document :** 1.4 — 22 juillet 2026  
+**Version document :** 1.5 — 23 juillet 2026  
 **Statut :** document de travail — arbitrages §12 clos ✅  
 **Historique :**
 
@@ -13,6 +13,7 @@
 | 1.2 | 2026-07-21 | Arbitrages : nom CardRW, open source différé, SecretStore, `{{uid}}`, idempotence hybride, labo cartes |
 | 1.3 | 2026-07-22 | §7 : principes moniteur diagnostic écran Carte + renvoi `docs/UX_ECRAN_CARTE.md` (v0.6) |
 | 1.4 | 2026-07-22 | §6.2 / §7 : coffre-fort de clés nommé + renvoi `docs/UX_COFFRE_CLES.md` |
+| 1.5 | 2026-07-23 | §6.2.2 profils de clés (key set) + renvoi `docs/UX_PROFIL_CLES.md` |
 
 ---
 
@@ -218,6 +219,12 @@ Bibliothèque **nommée** de matériaux crypto sur l’appareil (ergonomie labo 
 
 Détail UX, modèle, tranches K0–K4 : [`docs/UX_COFFRE_CLES.md`](UX_COFFRE_CLES.md).
 
+#### 6.2.2 Profils de clés (key set) 🆕
+
+Pour dump / encode / moniteur **multi-slots** sans choisir chaque clé une à une : un **profil** relie des contextes carte (PICC ou AID + n° de slot) à des **entrées du coffre** (références, pas de double stockage des octets). Distinct du coffre (matériaux) et de l’anneau (§7.3, statuts sur la carte posée).
+
+Spec UX et tranches P0–P7 : [`docs/UX_PROFIL_CLES.md`](UX_PROFIL_CLES.md).
+
 ---
 
 ## 7. Structure de l'interface
@@ -228,6 +235,7 @@ Structure retenue : **hybride wizard guidé + explorateur arborescent**, avec qu
 Accueil
  ├── 📡 Carte         — lire / encoder une carte (wizard + explorateur)
  ├── 🔐 Coffre-fort   — clés nommées (matériaux)                 (K1+ ; spec UX_COFFRE_CLES)
+ ├── 📎 Profils       — bindings slot→coffre (dump/encode auto)  (P1+ ; spec UX_PROFIL_CLES)
  ├── 🧩 Templates     — créer, éditer, lancer une série          (dès v1.1)
  ├── 💾 Dumps         — importer, exporter, restaurer            (restore v1.2)
  └── 📜 Journal APDU  — historique des trames (global ou par session)

@@ -3,7 +3,8 @@
 **Statut :** spec v0.6 (U0) — 2026-07-22  
 **Portée :** écran **Carte** (lecture / visualisation ; écriture plus tard sur le même contrat)  
 **CDC :** renvoie §7.1–7.2 ; ce fichier est la **source de vérité** du comportement moniteur  
-**Implémentation :** jalon **v0.6 UX**, tranches U1→U5 (ci-dessous)
+**Implémentation :** jalon **v0.6 UX**, tranches U1→U5 (ci-dessous)  
+**Suite multi-clés persistante :** profils / key set — [`UX_PROFIL_CLES.md`](UX_PROFIL_CLES.md)
 
 ---
 
