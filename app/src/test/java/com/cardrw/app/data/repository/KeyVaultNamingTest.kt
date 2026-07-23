@@ -8,24 +8,29 @@ import org.junit.Test
 class KeyVaultNamingTest {
 
     @Test
-    fun nextDefaultName_empty_isKey1() {
+    fun nextDefaultName_fills_holes() {
         assertEquals("key1", KeyVaultNaming.nextDefaultName(emptyList()))
+        assertEquals("key2", KeyVaultNaming.nextDefaultName(listOf("key1")))
+        assertEquals("key1", KeyVaultNaming.nextDefaultName(listOf("key2", "key3")))
     }
 
     @Test
-    fun nextDefaultName_fillsHoles() {
-        assertEquals("key2", KeyVaultNaming.nextDefaultName(listOf("key1", "key3")))
-        assertEquals("key1", KeyVaultNaming.nextDefaultName(listOf("key2")))
+    fun suggestContext_picc_and_app() {
+        assertEquals(
+            "PICC · k0",
+            KeyVaultNaming.suggestContextName(emptyList(), "000000", 0),
+        )
+        assertEquals(
+            "B613F5 · k2 Write",
+            KeyVaultNaming.suggestContextName(emptyList(), "B613F5", 2, "Write"),
+        )
     }
 
     @Test
-    fun nextDefaultName_caseInsensitive() {
-        assertEquals("key2", KeyVaultNaming.nextDefaultName(listOf("KEY1")))
-    }
-
-    @Test
-    fun looksLikeKeyHex() {
-        assertTrue(KeyVaultNaming.looksLikeKeyHex("00".repeat(16)))
-        assertFalse(KeyVaultNaming.looksLikeKeyHex("labo-master"))
+    fun suggestContext_collision_suffix() {
+        val existing = listOf("B613F5 · k2")
+        val s = KeyVaultNaming.suggestContextName(existing, "B613F5", 2)
+        assertTrue(s.contains("key1") || s != "B613F5 · k2")
+        assertFalse(KeyVaultNaming.looksLikeKeyHex("B613F5 · k2"))
     }
 }

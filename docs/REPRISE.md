@@ -79,7 +79,7 @@
 | **K1** | Meta + SecretStore persistant + CRUD + liste | ✅ |
 | **K2** | Sheet auth : dropdown **ou** hex + ☐ enregistrer | ✅ |
 | **K3** | Unlock biométrie / device credential optionnel | ✅ OFF défaut · session 5 min |
-| **K4** | Polish (suggestions nom, récents, export…) | ⬜ |
+| **K4** | Polish (suggestions nom, reveal, export meta) | ✅ |
 
 **Rappel :** slot carte 0–13 ≠ entrée coffre (nom → matériau). Anneau CDC §7.3 = statut sur la carte.
 
@@ -183,9 +183,9 @@ Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 - AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) Terrain K3 + ChangeKey AES + restore dump
-  B) K4 polish coffre / templates v1.1
-  C) Value/Records si besoin métier
+  A) Templates v1.1 (si besoin série)
+  B) Value/Records
+  C) Polish moniteur / dettes crypto mineures
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -195,7 +195,8 @@ Ne pas committer clés prod / dumps réels / local.properties
 - Dumps polish : toast export, Copier/Partager sur Carte, confirm delete liste
 - **K3** : verrou coffre biométrie/PIN (session 5 min), `VaultLockController`
 - **ChangeKey AES** UI moniteur (PICC + app), re-auth si slot courant
-- **Restore dump** : `DumpRestorePlanner` dry-run + exécution Carte (Format optionnel)
+- **Restore dump** : dry-run + exec ; DES→AES auto ; Write auth W/RW (pas master 0)
+- **K4** : reveal hex + copy, export meta sans secrets, suggestion nom `AID · kN · rôle`
 
 ---
 

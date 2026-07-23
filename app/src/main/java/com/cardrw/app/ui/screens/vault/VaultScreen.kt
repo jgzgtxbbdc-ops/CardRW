@@ -1,5 +1,7 @@
 package com.cardrw.app.ui.screens.vault
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,10 +13,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -30,14 +35,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -48,6 +56,8 @@ import com.cardrw.app.R
 import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.security.VaultBiometric
 import com.cardrw.app.viewmodel.VaultViewModel
+import java.text.DateFormat
+import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +71,21 @@ fun VaultScreen(
     var deleteTarget by remember { mutableStateOf<KeyVaultEntryMeta?>(null) }
     val context = LocalContext.current
     val activity = context as? FragmentActivity
+    val clipboard = LocalClipboardManager.current
+
+    // K4 : partage export meta dès que prêt
+    LaunchedEffect(ui.exportMetaText) {
+        val text = ui.exportMetaText ?: return@LaunchedEffect
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "CardRW vault meta")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(
+            Intent.createChooser(intent, context.getString(R.string.vault_export_meta)),
+        )
+        viewModel.consumeExportMeta()
+    }
 
     Scaffold(
         topBar = {
@@ -69,6 +94,19 @@ fun VaultScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
+                    }
+                },
+                actions = {
+                    if (ui.entries.isNotEmpty()) {
+                        IconButton(
+                            onClick = { viewModel.prepareMetaExport() },
+                            enabled = !ui.busy,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Share,
+                                contentDescription = stringResource(R.string.vault_export_meta),
+                            )
+                        }
                     }
                 },
             )
@@ -135,18 +173,13 @@ fun VaultScreen(
                             if (!ui.unlocked) {
                                 Button(
                                     onClick = {
-                                        if (activity == null) {
-                                            viewModel.clearMessages()
-                                            return@Button
-                                        }
+                                        if (activity == null) return@Button
                                         VaultBiometric.authenticate(
                                             activity = activity,
                                             title = context.getString(R.string.vault_unlock_title),
                                             subtitle = context.getString(R.string.vault_unlock_subtitle),
                                             onSuccess = { viewModel.onBiometricUnlocked() },
-                                            onError = { msg ->
-                                                // status via error field
-                                            },
+                                            onError = { },
                                         )
                                     },
                                     enabled = !ui.busy,
@@ -207,12 +240,73 @@ fun VaultScreen(
                             entry = entry,
                             enabled = !ui.busy,
                             onRename = { renameTarget = entry },
+                            onReveal = {
+                                if (ui.lockEnabled && !ui.unlocked && activity != null) {
+                                    VaultBiometric.authenticate(
+                                        activity = activity,
+                                        title = context.getString(R.string.vault_unlock_title),
+                                        subtitle = context.getString(R.string.vault_reveal_need_unlock),
+                                        onSuccess = {
+                                            viewModel.onBiometricUnlocked()
+                                            viewModel.reveal(entry.id)
+                                        },
+                                        onError = { },
+                                    )
+                                } else {
+                                    viewModel.reveal(entry.id)
+                                }
+                            },
                             onDelete = { deleteTarget = entry },
                         )
                     }
                 }
             }
         }
+    }
+
+    // K4 : dialog révélation hex
+    ui.revealedHex?.let { hex ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearReveal() },
+            title = {
+                Text(stringResource(R.string.vault_reveal_title, ui.revealedName.orEmpty()))
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = stringResource(R.string.vault_reveal_warn),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        text = hex.chunked(4).joinToString(" "),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(hex))
+                        Toast.makeText(
+                            context,
+                            R.string.vault_hex_copied,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        viewModel.clearReveal()
+                    },
+                ) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = null)
+                    Text("  " + stringResource(R.string.vault_copy_hex))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearReveal() }) {
+                    Text(stringResource(R.string.card_auth_cancel))
+                }
+            },
+        )
     }
 
     if (showCreate) {
@@ -266,8 +360,12 @@ private fun VaultEntryRow(
     entry: KeyVaultEntryMeta,
     enabled: Boolean,
     onRename: () -> Unit,
+    onReveal: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val used = entry.lastUsedAt?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -282,6 +380,19 @@ private fun VaultEntryRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace,
+                )
+                if (used != null) {
+                    Text(
+                        text = stringResource(R.string.vault_last_used, used),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            IconButton(onClick = onReveal, enabled = enabled) {
+                Icon(
+                    Icons.Outlined.Visibility,
+                    contentDescription = stringResource(R.string.vault_reveal),
                 )
             }
             IconButton(onClick = onRename, enabled = enabled) {

@@ -199,6 +199,14 @@ class CardViewModel @Inject constructor(
 
     fun nextVaultDefaultName(): String = keyVault.nextDefaultName()
 
+    /** K4 : suggestion mnémo pour ☐ enregistrer (AID · kN · rôle). */
+    fun suggestVaultSaveName(keyNo: Int, roleHint: String? = null): String =
+        keyVault.suggestContextName(
+            aidHex = _ui.value.selectedAidHex,
+            keyNo = keyNo,
+            roleHint = roleHint,
+        )
+
     fun clearLastDumpExport() {
         _ui.update { it.copy(lastDumpJson = null, lastDumpFileName = null) }
     }

@@ -536,7 +536,9 @@ private fun ReadyMonitor(
                 authPlan = plan,
                 initialKeyHex = ui.keyHex,
                 vaultEntries = vaultEntries,
-                defaultSaveName = viewModel.nextVaultDefaultName(),
+                suggestSaveName = { keyNo, role ->
+                    viewModel.suggestVaultSaveName(keyNo, role)
+                },
                 busy = ui.busy,
                 authenticated = authenticated,
                 selectedAid = ui.selectedAidHex,
@@ -952,7 +954,8 @@ private fun AuthSheetContent(
     authPlan: AuthKeyPlan,
     initialKeyHex: String,
     vaultEntries: List<KeyVaultEntryMeta>,
-    defaultSaveName: String,
+    /** K4 : suggestion nom coffre (AID · kN · rôle). */
+    suggestSaveName: (keyNo: Int, roleHint: String?) -> String,
     busy: Boolean,
     authenticated: Boolean,
     selectedAid: String?,
@@ -972,10 +975,21 @@ private fun AuthSheetContent(
     }
     var vaultMenuExpanded by remember { mutableStateOf(false) }
     var saveToVault by remember { mutableStateOf(false) }
-    var saveName by remember { mutableStateOf(defaultSaveName) }
+    var saveName by remember {
+        val role = authPlan.candidates.find { it.keyNo == preferred }?.roleLabel
+        mutableStateOf(suggestSaveName(preferred, role))
+    }
+    var saveNameTouched by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     var showAllKeys by remember(authPlan) {
         mutableStateOf(authPlan.candidates.isEmpty())
+    }
+    // Met à jour la suggestion si slot change et l’utilisateur n’a pas édité le nom
+    LaunchedEffect(draftKeyNo, selectedAid, authPlan) {
+        if (!saveNameTouched) {
+            val role = authPlan.candidates.find { it.keyNo == draftKeyNo }?.roleLabel
+            saveName = suggestSaveName(draftKeyNo, role)
+        }
     }
 
     val chips: List<Int> = when {
@@ -1218,9 +1232,15 @@ private fun AuthSheetContent(
             if (saveToVault) {
                 OutlinedTextField(
                     value = saveName,
-                    onValueChange = { saveName = it },
+                    onValueChange = {
+                        saveName = it
+                        saveNameTouched = true
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.vault_name)) },
+                    supportingText = {
+                        Text(stringResource(R.string.vault_name_suggest_hint))
+                    },
                     singleLine = true,
                     enabled = !busy,
                 )

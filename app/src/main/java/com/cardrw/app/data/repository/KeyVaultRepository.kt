@@ -46,6 +46,29 @@ class KeyVaultRepository @Inject constructor(
     fun nextDefaultName(): String =
         KeyVaultNaming.nextDefaultName(_entries.value.map { it.displayName })
 
+    /** Suggestion K4 contextuelle (AID + slot) — évite collision de noms. */
+    fun suggestContextName(aidHex: String?, keyNo: Int, roleHint: String? = null): String =
+        KeyVaultNaming.suggestContextName(
+            existingDisplayNames = _entries.value.map { it.displayName },
+            aidHex = aidHex,
+            keyNo = keyNo,
+            roleHint = roleHint,
+        )
+
+    /**
+     * Export **métadonnées seules** (pas de secrets) — liste pour support / backup noms.
+     */
+    fun exportMetaText(): String = buildString {
+        appendLine("# CardRW vault meta (no secrets)")
+        appendLine("# entries=${_entries.value.size}")
+        for (e in _entries.value) {
+            appendLine(
+                "${e.displayName}\tid=${e.id}\tcreated=${e.createdAt}\t" +
+                    "updated=${e.updatedAt}\tlastUsed=${e.lastUsedAt ?: "-"}",
+            )
+        }
+    }
+
     /**
      * Crée une entrée. [key16] doit faire 16 octets.
      * @return id

@@ -175,6 +175,15 @@
     <string name="vault_delete_message">« %1$s » sera effacée du coffre (irréversible sur cet appareil).</string>
     <string name="vault_delete_confirm">Supprimer</string>
     <string name="vault_entry_masked">•••••••• (AES-128)</string>
+    <string name="vault_last_used">Dernier usage : %1$s</string>
+    <string name="vault_reveal">Révéler hex</string>
+    <string name="vault_reveal_title">Clé « %1$s »</string>
+    <string name="vault_reveal_warn">Secret en clair — ne pas capturer d’écran / partager.</string>
+    <string name="vault_reveal_need_unlock">Déverrouille pour afficher le matériau</string>
+    <string name="vault_copy_hex">Copier hex</string>
+    <string name="vault_hex_copied">Hex copié</string>
+    <string name="vault_export_meta">Exporter la liste (sans secrets)</string>
+    <string name="vault_name_suggest_hint">Suggestion éditable (AID · slot · rôle)</string>
     <string name="vault_lock_title">Verrouiller le coffre (K3)</string>
     <string name="vault_lock_hint">Optionnel. Biométrie ou PIN appareil avant d’utiliser une clé du coffre (session 5 min).</string>
     <string name="vault_lock_status_open">Déverrouillé</string>

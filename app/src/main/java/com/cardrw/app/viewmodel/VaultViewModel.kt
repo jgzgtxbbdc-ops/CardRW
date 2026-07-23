@@ -6,6 +6,7 @@ import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.data.repository.KeyVaultNaming
 import com.cardrw.app.data.repository.KeyVaultRepository
 import com.cardrw.app.security.VaultLockController
+import com.cardrw.app.security.VaultLockedException
 import com.cardrw.desfire.util.Hex
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,12 @@ data class VaultUiState(
     val lockEnabled: Boolean = false,
     /** false si verrou ON et session expirée. */
     val unlocked: Boolean = true,
+    /** K4 : hex révélé (null = masqué). Effacer après copie / fermeture. */
+    val revealedId: String? = null,
+    val revealedName: String? = null,
+    val revealedHex: String? = null,
+    /** K4 : texte export meta prêt à partager. */
+    val exportMetaText: String? = null,
 )
 
 @HiltViewModel
@@ -77,6 +84,7 @@ class VaultViewModel @Inject constructor(
 
     fun lockNow() {
         vaultLock.lockNow()
+        clearReveal()
         refreshLockState()
         _ui.update { it.copy(statusMessage = "Coffre verrouillé") }
     }
@@ -120,6 +128,7 @@ class VaultViewModel @Inject constructor(
         viewModelScope.launch {
             _ui.update { it.copy(busy = true, errorMessage = null, statusMessage = null) }
             try {
+                if (_ui.value.revealedId == id) clearReveal()
                 keyVault.delete(id)
                 _ui.update { it.copy(busy = false, statusMessage = "Entrée supprimée") }
             } catch (e: Exception) {
@@ -128,6 +137,60 @@ class VaultViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** K4 : révéler le hex (nécessite coffre déverrouillé si K3 ON). */
+    fun reveal(id: String) {
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, errorMessage = null) }
+            try {
+                val meta = _ui.value.entries.find { it.id == id }
+                    ?: error("entrée introuvable")
+                val bytes = keyVault.material(id)
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        revealedId = id,
+                        revealedName = meta.displayName,
+                        revealedHex = Hex.encode(bytes),
+                        statusMessage = null,
+                    )
+                }
+            } catch (e: VaultLockedException) {
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        errorMessage = e.message,
+                        statusMessage = "Déverrouille le coffre pour révéler une clé",
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(busy = false, errorMessage = e.message ?: "Révélation impossible")
+                }
+            }
+        }
+    }
+
+    fun clearReveal() {
+        _ui.update {
+            it.copy(revealedId = null, revealedName = null, revealedHex = null)
+        }
+    }
+
+    /** K4 : export meta (noms + dates, **sans secrets**). */
+    fun prepareMetaExport() {
+        val text = keyVault.exportMetaText()
+        _ui.update {
+            it.copy(
+                exportMetaText = text,
+                statusMessage = "Export meta prêt (${it.entries.size} entrée(s), sans secrets)",
+            )
+        }
+    }
+
+    fun consumeExportMeta() {
+        _ui.update { it.copy(exportMetaText = null) }
     }
 
     fun clearMessages() {
