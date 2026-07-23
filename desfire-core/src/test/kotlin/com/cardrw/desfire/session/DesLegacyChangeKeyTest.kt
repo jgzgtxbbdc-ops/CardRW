@@ -47,7 +47,9 @@ class DesLegacyChangeKeyTest {
         assertEquals(0x80, payload[0].toInt() and 0xFF)
         assertEquals(1 + 24, payload.size)
 
-        val recovered = inverseSendDecypher(sessionKey, payload.copyOfRange(1, payload.size))
+        // Inverse de SEND ENCYPHER = RECV DECYPHER (cbcReceive)
+        val recovered = payload.copyOfRange(1, payload.size)
+        DesCipher.cbcReceive(sessionKey, DesCipher.zeroIv(), recovered)
         assertEquals(Hex.encode(expectedPadded), Hex.encode(recovered))
     }
 
@@ -80,27 +82,7 @@ class DesLegacyChangeKeyTest {
     }
 
     /**
-     * Inverse de [DesCipher.cbcSendLegacyDecrypt] (SEND + DECYPHER) :
-     * pour chaque bloc : `pt = ENC(ct) ⊕ IV` ; `IV ← ct`.
-     */
-    private fun inverseSendDecypher(key: ByteArray, cipher: ByteArray): ByteArray {
-        val out = cipher.copyOf()
-        val iv = DesCipher.zeroIv()
-        var offset = 0
-        while (offset < out.size) {
-            val ct = out.copyOfRange(offset, offset + 8)
-            val enc = DesCipher.encryptBlock(key, ct)
-            for (i in 0 until 8) {
-                out[offset + i] = (enc[i].toInt() xor iv[i].toInt()).toByte()
-            }
-            ct.copyInto(iv)
-            offset += 8
-        }
-        return out
-    }
-
-    /**
-     * Auth DES puis accepte un ChangeKey DES→AES bien formé (vérifie cryptogramme).
+     * Auth DES puis accepte un ChangeKey DES→AES bien formé (SEND ENCYPHER).
      */
     private class SimulatedDesThenChangeKeyCard(
         private val key: ByteArray,
@@ -144,20 +126,9 @@ class DesLegacyChangeKeyTest {
                     val sk = sessionKey!!
                     lastKeyNoWire = data[0].toInt() and 0xFF
                     check(lastKeyNoWire == 0x80) { "keyNo wire=${lastKeyNoWire.toString(16)}" }
-                    val cipher = data.copyOfRange(1, data.size)
-                    // Inverse SEND DECYPHER
-                    val plain = cipher.copyOf()
-                    val iv = DesCipher.zeroIv()
-                    var off = 0
-                    while (off < plain.size) {
-                        val ct = plain.copyOfRange(off, off + 8)
-                        val enc = DesCipher.encryptBlock(sk, ct)
-                        for (i in 0 until 8) {
-                            plain[off + i] = (enc[i].toInt() xor iv[i].toInt()).toByte()
-                        }
-                        ct.copyInto(iv)
-                        off += 8
-                    }
+                    val plain = data.copyOfRange(1, data.size)
+                    // Inverse SEND ENCYPHER
+                    DesCipher.cbcReceive(sk, DesCipher.zeroIv(), plain)
                     // newKey (16) + ver (1) + crc (2)
                     val body = plain.copyOfRange(0, 17)
                     val gotCrc = plain.copyOfRange(17, 19)
@@ -165,6 +136,8 @@ class DesLegacyChangeKeyTest {
                     check(gotCrc.contentEquals(expectCrc)) {
                         "CRC mismatch ${Hex.encode(gotCrc)} vs ${Hex.encode(expectCrc)}"
                     }
+                    // factory AES key expected in tests
+                    check(body.copyOfRange(0, 16).all { it == 0.toByte() })
                     changeKeyOk = true
                     step = 3
                     byteArrayOf(0x91.toByte(), 0x00)

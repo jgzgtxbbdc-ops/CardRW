@@ -66,10 +66,12 @@ class DesLegacySession(
      * ChangeKey (0xC4) DES legacy → nouvelle clé **AES-128**, cas **même slot**
      * (typiquement master PICC 0 authentifié).
      *
-     * Aligné libfreefare `mifare_desfire_change_key` (AS_LEGACY, PICC AES bit) :
+     * Structure (freefare / NXP EV1) :
      * - KeyNo wire = `keyNo | 0x80` (type AES sur PICC)
-     * - Corps chiffré : `newKey ‖ version ‖ CRC16(newKey‖version) ‖ pad 00`
-     * - Crypto : CBC SEND + DECYPHER (DESFire legacy), IV remis à 0
+     * - Corps : `newKey ‖ version ‖ CRC16(newKey‖version) ‖ pad 00`
+     * - Crypto : CBC **SEND ENCYPHER** (même sens que AuthenticateDES terrain NXP),
+     *   IV remis à 0 — *pas* le SEND DECYPHER de libfreefare (incompatible avec
+     *   les blank NXP où l’auth n’accepte que ENCYPHER).
      * - KeyNo reste **clair** en tête du data field
      *
      * @return data field APDU (sans opcode) : KeyNo ‖ cryptogramme
@@ -89,8 +91,8 @@ class DesLegacySession(
         val crc = Iso14443aCrc16.computeBytes(plainBody)
         val toEnc = plainBody + crc
         val padded = padZerosToBlock(toEnc, DesConstants.BLOCK_SIZE)
-        // AS_LEGACY SEND ENCIPHERED = DECYPHER CBC, IV = 0 en début d’opération
-        DesCipher.cbcSendLegacyDecrypt(sessionKey, DesCipher.zeroIv(), padded)
+        // Aligné AuthenticateDES blank NXP : SEND = ENCYPHER CBC, IV = 0
+        DesCipher.cbcSendEncrypt(sessionKey, DesCipher.zeroIv(), padded)
         return byteArrayOf(keyNoWire.toByte()) + padded
     }
 
