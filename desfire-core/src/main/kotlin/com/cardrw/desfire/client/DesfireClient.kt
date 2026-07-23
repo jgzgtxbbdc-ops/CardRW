@@ -1129,7 +1129,7 @@ class DesfireClient(
 
             when {
                 settings.fileType != FileType.STANDARD -> {
-                    dataError = "Type ${settings.fileType.labelFr} — lecture v1.1"
+                    dataError = "Type ${settings.fileType.label} — lecture v1.1"
                 }
                 !readStandardFiles -> { /* skip */ }
                 session == null && !settings.accessRights.isReadFree -> {

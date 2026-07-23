@@ -437,6 +437,7 @@ private fun FileTreeNode(
         accent = MaterialTheme.colorScheme.secondary,
         nested = true,
     ) {
+        // Une ligne : F0 · Std · 16B · FULL · R1/W2/RW2/Ch0  [OK]
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -448,22 +449,25 @@ private fun FileTreeNode(
                         expanded = !expanded
                     }
                 }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
-                        text = node.settings.summaryLabel,
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = node.settings.compactLine,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
                         modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 2,
                     )
                     Text(
                         text = accessBadge,
@@ -472,127 +476,129 @@ private fun FileTreeNode(
                         color = accessColor,
                     )
                 }
-                Text(
-                    text = "R=${rights.readLabel} · W=${rights.writeLabel} · " +
-                        "RW=${rights.readWriteLabel} · Ch=${rights.changeLabel}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // U5 : preview hex visible sans expand (P1 moniteur)
+                // Preview hex collée sous la ligne (sans expand)
                 if (dataHex != null && !expanded) {
                     Text(
-                        text = stringResource(
-                            R.string.card_file_preview,
-                            hexPreview(dataHex, maxBytes = 8),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
+                        text = hexPreview(dataHex, maxBytes = 8),
+                        style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurface,
-                    )
-                } else if (!complete && needsAuthForRead) {
-                    Text(
-                        text = stringResource(R.string.card_tree_file_incomplete),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }
             Icon(
                 imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                 contentDescription = null,
+                modifier = Modifier.size(20.dp),
             )
         }
 
-        Column(
-            modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            // Colonne pleine largeur : évite le libellé « Écrire » coupé verticalement
+        // CTA techniques EN courts, en ligne (Auth k1 · Write · Del)
+        val hasCta = needsAuthForRead || showWriteCta || structureEnabled ||
+            (neverRead && dataHex == null)
+        if (hasCta || expanded) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                if (needsAuthForRead) {
-                    val keysLabel = readPlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
-                    TextButton(
-                        onClick = onAuthForRead,
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            stringResource(
-                                R.string.card_file_auth_to_read,
-                                keysLabel.ifEmpty { "?" },
-                            ),
-                        )
-                    }
-                } else if (neverRead && dataHex == null) {
+                if (neverRead && dataHex == null && !needsAuthForRead) {
                     Text(
                         text = stringResource(R.string.card_file_read_never),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(horizontal = 8.dp),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
-                if (showWriteCta) {
-                    val writeKeys = writePlan.candidates.joinToString(", ") { "n°${it.keyNo}" }
-                    TextButton(
-                        onClick = onWrite,
-                        enabled = !busy,
+                if (needsAuthForRead || showWriteCta || structureEnabled) {
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(0.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            if (canWriteNow || writeKeys.isEmpty()) {
-                                stringResource(R.string.card_file_write_action)
-                            } else {
-                                stringResource(R.string.card_file_write_auth_action, writeKeys)
-                            },
-                        )
+                        if (needsAuthForRead) {
+                            val keysLabel = readPlan.candidates.joinToString(",") { "k${it.keyNo}" }
+                            TextButton(
+                                onClick = onAuthForRead,
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(
+                                    stringResource(
+                                        R.string.card_file_auth_to_read,
+                                        keysLabel.ifEmpty { "?" },
+                                    ),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                        if (showWriteCta) {
+                            val writeKeys = writePlan.candidates.joinToString(",") { "k${it.keyNo}" }
+                            TextButton(
+                                onClick = onWrite,
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(
+                                    if (canWriteNow || writeKeys.isEmpty()) {
+                                        stringResource(R.string.card_file_write_action)
+                                    } else {
+                                        stringResource(
+                                            R.string.card_file_write_auth_action,
+                                            writeKeys,
+                                        )
+                                    },
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                        if (structureEnabled) {
+                            TextButton(
+                                onClick = onDelete,
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(
+                                    stringResource(R.string.card_file_delete_action),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                     }
                 }
-                if (structureEnabled) {
-                    TextButton(
-                        onClick = onDelete,
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.card_file_delete_action))
-                    }
-                }
-            }
 
-            AnimatedVisibility(visible = expanded) {
-                val dataError = node.dataError
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    HorizontalDivider()
-                    when {
-                        dataHex != null -> {
-                            Text(
-                                text = stringResource(
-                                    R.string.card_file_data_full,
-                                    dataHex.length / 2,
-                                ),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                            Text(
-                                text = prettyHex(dataHex),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                        }
-                        dataError != null -> {
-                            Text(
-                                text = dataError,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        else -> {
-                            Text(
-                                text = stringResource(R.string.card_file_no_data),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                AnimatedVisibility(visible = expanded) {
+                    val dataError = node.dataError
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        HorizontalDivider()
+                        when {
+                            dataHex != null -> {
+                                Text(
+                                    text = stringResource(
+                                        R.string.card_file_data_full,
+                                        dataHex.length / 2,
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                Text(
+                                    text = prettyHex(dataHex),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                            dataError != null -> {
+                                Text(
+                                    text = dataError,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            else -> {
+                                Text(
+                                    text = stringResource(R.string.card_file_no_data),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }

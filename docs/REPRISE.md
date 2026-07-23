@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-23 (auto-auth moniteur)  
+**Dernière mise à jour :** 2026-07-23 (moniteur compact + termes EN)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — auth auto select + re-auth structure  
+**Commit :** (voir `git log -1`) — UI fichier compact + labels techniques EN  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -42,9 +42,14 @@
 **U5 livré :**
 - GetCardUID **auto** après explore si Random ID + session auth (bouton secours si échec)
 - Preview hex **8 octets** sur nœud fichier sans expand ; expand = hex complet + taille
-- Badges accès : Lu / Auth / Free / Never / Erreur
+- Badges accès : OK / Auth / Free / Never / Err
 - Restore scroll moniteur après busy (auth / explore)
 - Coffre : dialog « enregistrer quand même » si auth KO + option cochée
+
+**U5b — moniteur compact + termes techniques EN :**
+- Ligne fichier : `F0 · Std · 16B · FULL · R1/W2/RW2/Ch0` (+ badge)
+- Droits : `k1` / compact `R1/W2…` (E=Free, N=Never) ; comm PLAIN/MAC/FULL
+- CTA en ligne : `Auth k1` · `Write` · `Del` (plus de multi-lignes FR)
 
 **U4 livré :**
 - `DesfireCardTree.kt` : PICC super-nœud → apps enfants → fichiers imbriqués (plus de PICC « comme une app »)

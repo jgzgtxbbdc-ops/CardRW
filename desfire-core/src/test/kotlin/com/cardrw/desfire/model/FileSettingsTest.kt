@@ -29,7 +29,8 @@ class FileSettingsTest {
         assertEquals(CommMode.FULL, fs.commMode)
         assertEquals(256, fs.sizeBytes)
         assertEquals(0, fs.accessRights.read)
-        assertEquals("Clé 0", fs.accessRights.readLabel)
+        assertEquals("k0", fs.accessRights.readLabel)
+        assertEquals("F1 · Std · 256B · FULL · R0/W0/RW0/Ch0", fs.compactLine)
     }
 
     @Test

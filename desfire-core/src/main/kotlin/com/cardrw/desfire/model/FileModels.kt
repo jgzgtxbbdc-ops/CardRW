@@ -4,10 +4,11 @@ package com.cardrw.desfire.model
  * Mode de communication d’un fichier DESFire (2 bits bas de FileSettings).
  * CDC §3.2 / §5.2.
  */
-enum class CommMode(val wire: Int, val labelFr: String) {
-    PLAIN(0x00, "Plain"),
-    MACED(0x01, "MACed"),
-    FULL(0x03, "Fully enciphered"),
+/** [label] : terme technique court (EN) pour moniteur / dumps. */
+enum class CommMode(val wire: Int, val label: String) {
+    PLAIN(0x00, "PLAIN"),
+    MACED(0x01, "MAC"),
+    FULL(0x03, "FULL"),
     ;
 
     companion object {
@@ -24,13 +25,14 @@ enum class CommMode(val wire: Int, val labelFr: String) {
     }
 }
 
-enum class FileType(val code: Int, val labelFr: String) {
-    STANDARD(0x00, "Standard Data"),
-    BACKUP(0x01, "Backup Data"),
+/** [label] : court EN (Std / Backup / …) pour moniteur compact. */
+enum class FileType(val code: Int, val label: String) {
+    STANDARD(0x00, "Std"),
+    BACKUP(0x01, "Backup"),
     VALUE(0x02, "Value"),
-    LINEAR_RECORDS(0x03, "Linear Records"),
-    CYCLIC_RECORDS(0x04, "Cyclic Records"),
-    UNKNOWN(-1, "Inconnu"),
+    LINEAR_RECORDS(0x03, "LinRec"),
+    CYCLIC_RECORDS(0x04, "CycRec"),
+    UNKNOWN(-1, "?"),
     ;
 
     companion object {
@@ -49,16 +51,29 @@ data class AccessRights(
     val change: Int,
     val raw: Int,
 ) {
+    /** Libellé court EN : Free / Never / k0…k13. */
     fun describe(key: Int): String = when (key and 0x0F) {
         0x0E -> "Free"
         0x0F -> "Never"
-        else -> "Clé ${key and 0x0F}"
+        else -> "k${key and 0x0F}"
+    }
+
+    /** Encore plus compact pour une ligne moniteur : E / N / 0…13. */
+    fun describeDigit(key: Int): String = when (key and 0x0F) {
+        0x0E -> "E"
+        0x0F -> "N"
+        else -> "${key and 0x0F}"
     }
 
     val readLabel: String get() = describe(read)
     val writeLabel: String get() = describe(write)
     val readWriteLabel: String get() = describe(readWrite)
     val changeLabel: String get() = describe(change)
+
+    /** Une ligne : R1/W2/RW2/Ch0 (E=Free, N=Never). */
+    val compactLabel: String
+        get() = "R${describeDigit(read)}/W${describeDigit(write)}/" +
+            "RW${describeDigit(readWrite)}/Ch${describeDigit(change)}"
 
     val isReadFree: Boolean get() = (read and 0x0F) == 0x0E
     val isReadNever: Boolean get() = (read and 0x0F) == 0x0F
@@ -151,12 +166,20 @@ data class FileSettings(
     val raw: ByteArray,
 ) {
     val isStandard: Boolean get() = fileType == FileType.STANDARD
+    /**
+     * Ligne moniteur compacte EN : `F0 · Std · 16B · FULL`.
+     * Droits à part via [AccessRights.compactLabel].
+     */
     val summaryLabel: String
         get() = buildString {
-            append("Fichier $fileNo · ${fileType.labelFr}")
-            if (sizeBytes != null) append(" · $sizeBytes o")
-            append(" · ${commMode.labelFr}")
+            append("F$fileNo · ${fileType.label}")
+            if (sizeBytes != null) append(" · ${sizeBytes}B")
+            append(" · ${commMode.label}")
         }
+
+    /** Une seule ligne titre + droits : `F0 · Std · 16B · FULL · R1/W2/RW2/Ch0`. */
+    val compactLine: String
+        get() = "$summaryLabel · ${accessRights.compactLabel}"
 
     /**
      * Mode effectif pour **écriture** (aligné freefare `madame_soleil_get_write_communication_settings`) :

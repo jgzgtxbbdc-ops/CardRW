@@ -35,14 +35,14 @@
     <string name="card_tree_title">Arbre carte (PICC → apps → fichiers)</string>
     <string name="card_tree_hint">Tap = select + lecture auto · Double-tap = auth clé par défaut (n°0 usine). Une seule app détaillée à la fois.</string>
     <string name="card_tree_legend">Trait plein = lisible / déjà lu · pointillé = lacune (droits, free-list, non exploré).</string>
-    <string name="card_tree_access_legend">Badges fichier : Lu · Auth · Free · Never · … · expand = hex complet.</string>
+    <string name="card_tree_access_legend">Badges fichier : OK · Auth · Free · Never · … · expand = hex complet.</string>
     <string name="card_file_preview">%1$s</string>
-    <string name="card_file_data_full">Données (%1$d o, hex)</string>
-    <string name="card_file_badge_read">Lu</string>
+    <string name="card_file_data_full">Data (%1$d B, hex)</string>
+    <string name="card_file_badge_read">OK</string>
     <string name="card_file_badge_auth">Auth</string>
     <string name="card_file_badge_free">Free</string>
     <string name="card_file_badge_never">Never</string>
-    <string name="card_file_badge_error">Erreur</string>
+    <string name="card_file_badge_error">Err</string>
     <string name="card_file_badge_pending">…</string>
     <string name="card_get_card_uid_auto_hint">UID réel : lecture auto après auth (Random ID). Secours ci-dessous si besoin.</string>
     <string name="card_tree_apps_header">Applications (%1$d)</string>
@@ -61,7 +61,7 @@
     <string name="card_tree_app_cache_files">%1$d fichier(s) · %2$d lu(s)</string>
     <string name="card_tree_cached_badge">Cache</string>
     <string name="card_tree_collapsed_hint">%1$d fichier(s) en cache · %2$d lu(s) — select pour déplier</string>
-    <string name="card_tree_file_incomplete">Contenu non lu (auth requise)</string>
+    <string name="card_tree_file_incomplete">Need auth</string>
     <string name="card_session_selected_picc">PICC sélectionné</string>
     <string name="card_session_detail_picc">PICC · clé %1$d</string>
     <string name="card_default_auth_ok">Authentification réussie avec la clé par défaut</string>
@@ -87,9 +87,9 @@
     <string name="card_upgrade_aes_action">Basculer en AES</string>
     <string name="card_tree_add_file">Ajouter un fichier…</string>
     <string name="card_tree_delete_app">Supprimer l’app…</string>
-    <string name="card_file_write_action">Écrire…</string>
-    <string name="card_file_write_auth_action">Écrire (clé %1$s)…</string>
-    <string name="card_file_delete_action">Supprimer…</string>
+    <string name="card_file_write_action">Write</string>
+    <string name="card_file_write_auth_action">Write %1$s</string>
+    <string name="card_file_delete_action">Del</string>
     <string name="card_write_sheet_title">Écrire le fichier %1$d</string>
     <string name="card_write_sheet_current">Contenu actuel (sur la carte)</string>
     <string name="card_write_sheet_current_empty">— (pas encore lu)</string>
@@ -157,8 +157,8 @@
     <string name="card_auth_vault_empty_hint">Coffre vide — saisis l’hex (option enregistrer) ou gère le coffre depuis l’accueil.</string>
     <string name="card_auth_keys_show_all">Afficher tous les slots 0–13…</string>
     <string name="card_auth_keys_candidates_only">Slots utiles seulement</string>
-    <string name="card_file_auth_to_read">Authentifier pour lire (%1$s)…</string>
-    <string name="card_file_read_never">Lecture interdite (Never)</string>
+    <string name="card_file_auth_to_read">Auth %1$s</string>
+    <string name="card_file_read_never">Read Never</string>
     <string name="card_get_card_uid">Lire UID réel (GetCardUID)</string>
 
     <!-- Coffre-fort -->
