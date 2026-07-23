@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-23 (moniteur compact + termes EN)  
+**Dernière mise à jour :** 2026-07-23 (create-file UX + polish dumps)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — UI fichier compact + labels techniques EN  
+**Commit :** (voir `git log -1`) — dump toast/share + delete confirm  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -183,11 +183,16 @@ Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 - AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) Terrain dumps (export + liste + share)
-  B) K3 biométrie coffre — non prioritaire
-  C) Restauration dump (v1.2) — plus tard
+  A) K3 biométrie coffre — non prioritaire
+  B) Restauration dump (v1.2) — plus tard
+  C) ChangeKey AES UI (apps / non-DES) si besoin terrain
 Ne pas committer clés prod / dumps réels / local.properties
 ```
+
+**Session 2026-07-23 (suite) :**
+- Moniteur compact + labels EN + droits Proxmark `r: w: rw: ch:`
+- Create file : n° suivant auto, sheet ouverte, message OK
+- Dumps polish : toast export, Copier/Partager sur Carte, confirm delete liste
 
 ---
 
@@ -195,11 +200,11 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — Terrain dumps** + polish export.  
-   - **B — K3** biométrie coffre (optionnel).  
+   - **A — K3** biométrie coffre (optionnel).  
+   - **B — ChangeKey AES** exposé UI si besoin labo non-usine.  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : dump moniteur **sans secrets** livré ; restore / include keys plus tard.
+Avis fil rouge : dump moniteur **sans secrets** + share/copy livrés ; restore v1.2 plus tard.
 
 ---
 

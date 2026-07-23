@@ -21,6 +21,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -34,6 +36,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -56,6 +61,7 @@ fun DumpsScreen(
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var pendingDelete by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refresh() }
 
@@ -171,7 +177,7 @@ fun DumpsScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                IconButton(onClick = { viewModel.delete(item.fileName) }) {
+                                IconButton(onClick = { pendingDelete = item.fileName }) {
                                     Icon(
                                         Icons.Outlined.Delete,
                                         contentDescription = stringResource(R.string.dumps_delete),
@@ -183,6 +189,29 @@ fun DumpsScreen(
                 }
             }
         }
+    }
+
+    pendingDelete?.let { name ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(R.string.dumps_delete_title)) },
+            text = { Text(stringResource(R.string.dumps_delete_message, name)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.delete(name)
+                        pendingDelete = null
+                    },
+                ) {
+                    Text(stringResource(R.string.dumps_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.card_auth_cancel))
+                }
+            },
+        )
     }
 }
 

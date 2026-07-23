@@ -202,17 +202,20 @@
     <string name="templates_title">Templates</string>
     <string name="templates_placeholder">Les templates et l’encodage en série arrivent en v1.1.</string>
     <string name="dumps_title">Dumps</string>
-    <string name="dumps_placeholder">Dumps JSON structurés en v1 · restauration en v1.2.</string>
+    <string name="dumps_placeholder">Dumps moniteur sans secrets · restauration en v1.2.</string>
     <string name="dumps_hint">Exports moniteur (structure + données lues, sans clés). Créés depuis l’écran Carte · « Exporter dump ».</string>
     <string name="dumps_empty">Aucun dump local. Lis une carte puis exporte depuis l’écran Carte.</string>
-    <string name="dumps_item_meta">%1$s · %2$d o</string>
+    <string name="dumps_item_meta">%1$s · %2$d B</string>
     <string name="dumps_copy">Copier JSON</string>
     <string name="dumps_share">Partager</string>
     <string name="dumps_delete">Supprimer</string>
+    <string name="dumps_delete_title">Supprimer ce dump ?</string>
+    <string name="dumps_delete_message">%1$s sera effacé du stockage local (irréversible).</string>
     <string name="dumps_close_preview">Fermer</string>
     <string name="dumps_copied">Dump copié</string>
     <string name="card_export_dump">Exporter dump (structure)…</string>
     <string name="card_export_dump_copied">Dump copié dans le presse-papiers</string>
+    <string name="card_export_dump_ready">Dernier dump : %1$s</string>
 
     <!-- Disclaimer -->
     <string name="disclaimer_title">Usage légitime</string>

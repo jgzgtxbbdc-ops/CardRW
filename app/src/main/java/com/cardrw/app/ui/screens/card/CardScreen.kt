@@ -62,10 +62,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -274,12 +277,18 @@ private fun ReadyMonitor(
         viewModel.consumePendingWriteFile()
     }
 
-    // Dump exporté → presse-papiers (JSON sans secrets)
+    // Dump exporté → presse-papiers + toast (JSON sans secrets)
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     LaunchedEffect(ui.lastDumpJson, ui.lastDumpFileName) {
         val json = ui.lastDumpJson ?: return@LaunchedEffect
         clipboard.setText(AnnotatedString(json))
-        // laissé en mémoire pour un 2e copier éventuel ; clear au prochain export
+        Toast.makeText(
+            context,
+            context.getString(R.string.card_export_dump_copied),
+            Toast.LENGTH_SHORT,
+        ).show()
+        // JSON resté en mémoire pour Partager ; clear au prochain export
     }
 
     // Ferme la sheet après auth OK (explore auto U1 peut encore tourner : on ferme dès session OK + !busy auth phase)
@@ -435,6 +444,54 @@ private fun ReadyMonitor(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.card_export_dump))
+            }
+            // Après export : partage / re-copie du dernier dump (toujours sans secrets)
+            val lastDump = ui.lastDumpJson
+            val lastDumpName = ui.lastDumpFileName
+            if (lastDump != null && lastDumpName != null) {
+                Text(
+                    text = stringResource(R.string.card_export_dump_ready, lastDumpName),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(lastDump))
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.dumps_copied),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                        enabled = !ui.busy,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.dumps_copy))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(Intent.EXTRA_SUBJECT, lastDumpName)
+                                putExtra(Intent.EXTRA_TEXT, lastDump)
+                            }
+                            context.startActivity(
+                                Intent.createChooser(
+                                    intent,
+                                    context.getString(R.string.dumps_share),
+                                ),
+                            )
+                        },
+                        enabled = !ui.busy,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.dumps_share))
+                    }
+                }
             }
             OutlinedButton(
                 onClick = { viewModel.resetToWaiting() },
