@@ -679,8 +679,11 @@ class CardViewModel @Inject constructor(
     }
 
     /**
-     * Garantit une session AES master PICC (clé 0) pour Create / Format / Delete app.
+     * Garantit une session **AES** master PICC (clé 0) pour Create / Format / Delete / restore.
      * Rejoue mémorisée ou usine sans saisie.
+     *
+     * Ne **jamais** accepter DES legacy : Create/Write exigent AES. Si master encore DES
+     * (carte vierge NXP), message → bascule DES→AES moniteur.
      */
     private suspend fun ensurePiccMasterAesSession(): Boolean {
         val sess = _ui.value.authSession
@@ -692,15 +695,30 @@ class CardViewModel @Inject constructor(
         ) {
             return true
         }
+        // Session DES déjà ouverte : ne pas prétendre « structure OK »
+        if (sess?.authenticated == true &&
+            sess.aidHex.equals("000000", ignoreCase = true) &&
+            sess.smLevel == SecureMessagingLevel.DES_LEGACY
+        ) {
+            _ui.update {
+                it.copy(
+                    busy = false,
+                    errorMessage = "PICC master encore en DES usine — " +
+                        "bascule en AES (bouton « Basculer master PICC en AES ») avant Create / restore.",
+                    statusLine = "Session DES · structure AES bloquée",
+                )
+            }
+            return false
+        }
         _ui.update {
             it.copy(
                 busy = true,
                 errorMessage = null,
-                statusLine = "Auth auto PICC master (structure)…",
+                statusLine = "Auth auto PICC master AES (structure)…",
                 selectedAidHex = "000000",
             )
         }
-        // Mémorisée PICC clé 0
+        // Mémorisée PICC clé 0 (AES uniquement — silentAuth refuse DES pour structure)
         val remembered = rememberedKeysByAid["000000"]?.get(0)
         if (remembered != null) {
             val ok = silentAuthThenExplore(
@@ -708,20 +726,50 @@ class CardViewModel @Inject constructor(
                 remembered = remembered,
                 flashMessage = authFlashMessage("000000", 0, "mémorisée"),
                 fillRemembered = false,
+                allowDesFactoryFallback = false,
             )
-            if (ok) return true
+            if (ok) {
+                val after = _ui.value.authSession
+                if (after?.smLevel != null &&
+                    after.smLevel != SecureMessagingLevel.DES_LEGACY &&
+                    after.smLevel != SecureMessagingLevel.NONE
+                ) {
+                    return true
+                }
+            }
         }
-        // Usine
+        // Usine AES only — pas de fallback DES (sinon restore/create croient être OK)
         val keyBytes = AesConstants.FACTORY_KEY.copyOf()
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
                 client.ensureApplicationSelected(Aid.PICC)
-                client.authenticateAesPreferEv1(0, keyBytes, "000000")
+                client.authenticateAesPreferEv1(
+                    keyNo = 0,
+                    key = keyBytes,
+                    aidHex = "000000",
+                    allowDesFactoryFallback = false,
+                )
                 client.authSession
             }
         }
         return result.fold(
             onSuccess = { session ->
+                if (session == null ||
+                    session.smLevel == SecureMessagingLevel.DES_LEGACY ||
+                    session.smLevel == SecureMessagingLevel.NONE
+                ) {
+                    syncJournal()
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            authSession = session,
+                            errorMessage = "PICC master encore en DES usine — " +
+                                "bascule en AES avant Create / Format / restore.",
+                            statusLine = "AES usine refusée · DES possible via moniteur",
+                        )
+                    }
+                    return@fold false
+                }
                 rememberAuth("000000", 0, keyBytes, vaultEntryId = null)
                 _ui.update {
                     it.copy(
@@ -737,11 +785,19 @@ class CardViewModel @Inject constructor(
             },
             onFailure = { e ->
                 syncJournal()
+                val desHint = if (
+                    e is DesfireProtocolException &&
+                    e.message?.contains("Authentication", ignoreCase = true) == true
+                ) {
+                    " Si carte vierge NXP (master DES), utilise « Basculer master PICC en AES »."
+                } else {
+                    ""
+                }
                 _ui.update {
                     it.copy(
                         busy = false,
                         authSession = null,
-                        errorMessage = "Auth PICC master requise : ${e.message}",
+                        errorMessage = "Auth PICC master AES requise : ${e.message}.$desHint",
                     )
                 }
                 false
@@ -751,6 +807,7 @@ class CardViewModel @Inject constructor(
 
     /**
      * Auth silencieuse avec matériau mémorisé → explore (+ option fill multi-clés).
+     * @param allowDesFactoryFallback false pour ops structure (Create/restore) — AES only.
      * @return true si auth OK
      */
     private suspend fun silentAuthThenExplore(
@@ -758,6 +815,7 @@ class CardViewModel @Inject constructor(
         remembered: RememberedAppAuth,
         flashMessage: String?,
         fillRemembered: Boolean = true,
+        allowDesFactoryFallback: Boolean = true,
     ): Boolean {
         val keyNo = remembered.keyNo
         val keyBytes: ByteArray = try {
@@ -786,12 +844,27 @@ class CardViewModel @Inject constructor(
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
                 client.ensureApplicationSelected(Aid.fromHex(aidHex))
-                client.authenticateAesPreferEv1(keyNo, keyBytes, aidHex)
+                client.authenticateAesPreferEv1(
+                    keyNo = keyNo,
+                    key = keyBytes,
+                    aidHex = aidHex,
+                    allowDesFactoryFallback = allowDesFactoryFallback,
+                )
                 client.authSession
             }
         }
         return result.fold(
             onSuccess = { session ->
+                // Structure AES-only : refuser de compter une session DES comme succès
+                if (!allowDesFactoryFallback &&
+                    (session == null ||
+                        session.smLevel == SecureMessagingLevel.DES_LEGACY ||
+                        session.smLevel == SecureMessagingLevel.NONE)
+                ) {
+                    syncJournal()
+                    _ui.update { it.copy(busy = false, authSession = session) }
+                    return@fold false
+                }
                 rememberAuth(aidHex, keyNo, keyBytes, remembered.vaultEntryId)
                 _ui.update {
                     it.copy(

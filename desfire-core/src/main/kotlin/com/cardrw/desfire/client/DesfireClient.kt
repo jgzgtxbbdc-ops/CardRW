@@ -520,14 +520,18 @@ class DesfireClient(
      * Auth labo moniteur :
      * 1) **EV1 AES** `0xAA`
      * 2) si méthode refusée → **EV2** `0x71`
-     * 3) si clé usine 00…00 et échec AES (0xAE typique) → **DES usine** `0x0A`
-     *    (PICC master carte **vierge** NXP)
+     * 3) si [allowDesFactoryFallback] + clé usine 00…00 et échec AES (0xAE) → **DES usine** `0x0A`
+     *    (PICC master carte **vierge** NXP — lecture / moniteur seulement)
+     *
+     * Structure (Create/Format/restore) : passer [allowDesFactoryFallback] = **false**
+     * pour ne pas masquer une master encore DES (il faut bascule DES→AES).
      */
     fun authenticateAesPreferEv1(
         keyNo: Int,
         key: ByteArray = AesConstants.FACTORY_KEY,
         aidHex: String = session?.aidHex ?: "000000",
         rndA: ByteArray? = null,
+        allowDesFactoryFallback: Boolean = true,
     ): DesfireSecureSession {
         try {
             return authenticateAes(keyNo, key, aidHex, rndA)
@@ -541,7 +545,8 @@ class DesfireClient(
             }
             // DES usine 0x0A : **uniquement** master PICC (carte vierge). Jamais sur
             // une app AES (slots 1/2…) — sinon spam 0xAE + authentifications inutiles.
-            if (isAllZeroKey(key) &&
+            if (allowDesFactoryFallback &&
+                isAllZeroKey(key) &&
                 keyNo == 0 &&
                 isPiccAidHex(aidHex) &&
                 shouldFallbackToDesFactory(e)
