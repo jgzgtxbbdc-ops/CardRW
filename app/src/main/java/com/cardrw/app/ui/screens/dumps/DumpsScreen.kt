@@ -121,6 +121,33 @@ fun DumpsScreen(
                         Text(stringResource(R.string.dumps_close_preview))
                     }
                 }
+                if (ui.planWarnings.isNotEmpty() || ui.planLines.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.dumps_restore_plan_hint),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    ui.planWarnings.take(4).forEach { w ->
+                        Text(
+                            text = "· $w",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
+                    ui.planLines.take(12).forEach { line ->
+                        Text(
+                            text = "· $line",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    if (ui.planLines.size > 12) {
+                        Text(
+                            text = "… +${ui.planLines.size - 12}",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
                 Text(
                     text = ui.selectedJson.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,

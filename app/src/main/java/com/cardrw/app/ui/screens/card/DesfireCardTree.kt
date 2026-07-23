@@ -93,6 +93,7 @@ fun DesfireCardTree(
     onDeleteApplication: (aidHex: String) -> Unit = {},
     onAddFile: () -> Unit = {},
     onDeleteFile: (FileNode) -> Unit = {},
+    onChangeKey: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val isPiccSelected = selectedAidHex.equals("000000", ignoreCase = true)
@@ -166,6 +167,13 @@ fun DesfireCardTree(
                             Text(stringResource(R.string.card_tree_add_app))
                         }
                         OutlinedButton(
+                            onClick = onChangeKey,
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.card_tree_change_key))
+                        }
+                        OutlinedButton(
                             onClick = onFormatPicc,
                             enabled = !busy,
                             modifier = Modifier.fillMaxWidth(),
@@ -217,6 +225,7 @@ fun DesfireCardTree(
                             onDeleteApp = { onDeleteApplication(hex) },
                             onAddFile = onAddFile,
                             onDeleteFile = onDeleteFile,
+                            onChangeKey = onChangeKey,
                         )
                     }
                 }
@@ -243,6 +252,7 @@ private fun AppTreeNode(
     onDeleteApp: () -> Unit,
     onAddFile: () -> Unit,
     onDeleteFile: (FileNode) -> Unit,
+    onChangeKey: () -> Unit,
 ) {
     val structureComplete = explore != null &&
         (explore.keySettings != null || explore.structureFromCache || explore.files.isNotEmpty() ||
@@ -363,6 +373,13 @@ private fun AppTreeNode(
                         ) {
                             Text(stringResource(R.string.card_tree_delete_app))
                         }
+                    }
+                    OutlinedButton(
+                        onClick = onChangeKey,
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.card_tree_change_key))
                     }
                 }
                 RefreshRow(busy = busy, onRefresh = onRefresh)

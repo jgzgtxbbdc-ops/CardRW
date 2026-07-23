@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cardrw.app.data.repository.DumpListItem
 import com.cardrw.app.data.repository.DumpRepository
+import com.cardrw.desfire.dump.CardDumpBuilder
+import com.cardrw.desfire.dump.DumpRestorePlanner
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +21,9 @@ data class DumpUiState(
     val selectedJson: String? = null,
     val selectedName: String? = null,
     val statusLine: String? = null,
+    /** Dry-run plan lines for selected dump. */
+    val planLines: List<String> = emptyList(),
+    val planWarnings: List<String> = emptyList(),
 )
 
 @HiltViewModel
@@ -43,18 +48,36 @@ class DumpViewModel @Inject constructor(
     fun open(fileName: String) {
         viewModelScope.launch {
             val json = withContext(Dispatchers.IO) { dumps.readJson(fileName) }
+            val plan = if (json != null) {
+                try {
+                    DumpRestorePlanner.plan(CardDumpBuilder.parseJson(json))
+                } catch (_: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
             _ui.update {
                 it.copy(
                     selectedName = fileName,
                     selectedJson = json,
                     statusLine = if (json == null) "Fichier introuvable" else null,
+                    planLines = plan?.steps?.map { s -> s.label }.orEmpty(),
+                    planWarnings = plan?.warnings.orEmpty(),
                 )
             }
         }
     }
 
     fun clearSelection() {
-        _ui.update { it.copy(selectedJson = null, selectedName = null) }
+        _ui.update {
+            it.copy(
+                selectedJson = null,
+                selectedName = null,
+                planLines = emptyList(),
+                planWarnings = emptyList(),
+            )
+        }
     }
 
     fun delete(fileName: String) {

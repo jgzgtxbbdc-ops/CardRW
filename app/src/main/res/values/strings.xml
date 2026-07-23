@@ -175,6 +175,14 @@
     <string name="vault_delete_message">« %1$s » sera effacée du coffre (irréversible sur cet appareil).</string>
     <string name="vault_delete_confirm">Supprimer</string>
     <string name="vault_entry_masked">•••••••• (AES-128)</string>
+    <string name="vault_lock_title">Verrouiller le coffre (K3)</string>
+    <string name="vault_lock_hint">Optionnel. Biométrie ou PIN appareil avant d’utiliser une clé du coffre (session 5 min).</string>
+    <string name="vault_lock_status_open">Déverrouillé</string>
+    <string name="vault_lock_status_closed">Verrouillé — déverrouille pour utiliser les clés</string>
+    <string name="vault_unlock_title">Déverrouiller le coffre</string>
+    <string name="vault_unlock_subtitle">Biométrie ou PIN de l’appareil</string>
+    <string name="vault_unlock_action">Déverrouiller</string>
+    <string name="vault_lock_now">Verrouiller maintenant</string>
 
 
     <!-- Explorateur -->
@@ -213,9 +221,23 @@
     <string name="dumps_delete_message">%1$s sera effacé du stockage local (irréversible).</string>
     <string name="dumps_close_preview">Fermer</string>
     <string name="dumps_copied">Dump copié</string>
+    <string name="dumps_restore_plan_hint">Dry-run restore (exécution sur écran Carte · Restaurer un dump)</string>
     <string name="card_export_dump">Exporter dump (structure)…</string>
     <string name="card_export_dump_copied">Dump copié dans le presse-papiers</string>
     <string name="card_export_dump_ready">Dernier dump : %1$s</string>
+    <string name="card_tree_change_key">ChangeKey AES…</string>
+    <string name="card_change_key_title">ChangeKey AES</string>
+    <string name="card_change_key_hint">ChangeKey (0xC4) sur %1$s. Session AES requise (souvent master 0). Labo : nouvelle clé 00…00 ou hex libre.</string>
+    <string name="card_change_key_slot">Slot carte (0–13)</string>
+    <string name="card_change_key_action">ChangeKey</string>
+    <string name="card_restore_dump">Restaurer un dump…</string>
+    <string name="card_restore_title">Restaurer un dump</string>
+    <string name="card_restore_hint">Dry-run puis exécution labo (structure + données lues, sans secrets). Prérequis : master PICC AES (souvent usine). Apps créées avec settings ouverts.</string>
+    <string name="card_restore_pick">Dump local</string>
+    <string name="card_restore_format_first">FormatPICC d’abord (efface la carte)</string>
+    <string name="card_restore_plan">Plan (%1$d étapes)</string>
+    <string name="card_restore_dry_run">Dry-run (plan seulement)</string>
+    <string name="card_restore_execute">Exécuter sur la carte</string>
 
     <!-- Disclaimer -->
     <string name="disclaimer_title">Usage légitime</string>

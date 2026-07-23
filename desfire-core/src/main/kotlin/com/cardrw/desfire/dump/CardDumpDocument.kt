@@ -67,7 +67,15 @@ data class DumpFileMeta(
     val type: String,
     @SerialName("comm_mode") val commMode: String,
     @SerialName("size_bytes") val sizeBytes: Int? = null,
+    /** Libellé Proxmark-like (affichage). */
     @SerialName("access_rights") val accessRights: String,
+    /**
+     * MDAR logique 16 bits (Read/Write/RW/Change) — pour restore.
+     * Absent des dumps anciens → Free `0xEEEE` côté planner.
+     */
+    @SerialName("access_rights_raw") val accessRightsRaw: Int? = null,
+    /** Wire comm mode 0x00/01/03 — pour restore. */
+    @SerialName("comm_mode_wire") val commModeWire: Int? = null,
     @SerialName("data_status") val dataStatus: String,
 )
 

@@ -84,6 +84,7 @@ import com.cardrw.app.viewmodel.CardUiState
 import com.cardrw.app.viewmodel.CardViewModel
 import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.crypto.SecureMessagingLevel
+import com.cardrw.desfire.dump.DumpRestorePlanner
 import com.cardrw.desfire.model.AuthBarrier
 import com.cardrw.desfire.model.AuthIntent
 import com.cardrw.desfire.model.AuthKeyPlan
@@ -202,6 +203,8 @@ private fun ReadyMonitor(
     var showCreateApp by remember { mutableStateOf(false) }
     var showCreateFile by remember { mutableStateOf(false) }
     var showUpgradeAes by remember { mutableStateOf(false) }
+    var showChangeKey by remember { mutableStateOf(false) }
+    var showRestoreDump by remember { mutableStateOf(false) }
     var deleteAppAid by remember { mutableStateOf<String?>(null) }
     var deleteFileNo by remember { mutableStateOf<Int?>(null) }
     var showFormatPicc by remember { mutableStateOf(false) }
@@ -431,6 +434,7 @@ private fun ReadyMonitor(
                 onDeleteApplication = { aid -> deleteAppAid = aid },
                 onAddFile = { showCreateFile = true },
                 onDeleteFile = { node -> deleteFileNo = node.fileNo },
+                onChangeKey = { showChangeKey = true },
             )
 
             if (identity.rawNotes.isNotEmpty()) {
@@ -444,6 +448,16 @@ private fun ReadyMonitor(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.card_export_dump))
+            }
+            OutlinedButton(
+                onClick = {
+                    viewModel.clearRestorePreview()
+                    showRestoreDump = true
+                },
+                enabled = !ui.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.card_restore_dump))
             }
             // Après export : partage / re-copie du dernier dump (toujours sans secrets)
             val lastDump = ui.lastDumpJson
@@ -650,6 +664,67 @@ private fun ReadyMonitor(
                 errorMessage = ui.errorMessage,
                 onDismiss = { if (!ui.busy) showCreateFile = false },
                 onCreate = { no, size -> viewModel.createStdFileLab(no, size) },
+            )
+        }
+    }
+
+    if (showChangeKey) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { if (!ui.busy) showChangeKey = false },
+            sheetState = sheetState,
+        ) {
+            ChangeKeyAesSheetContent(
+                selectedAidHex = ui.selectedAidHex,
+                busy = ui.busy,
+                statusLine = ui.statusLine,
+                errorMessage = ui.errorMessage,
+                onDismiss = { if (!ui.busy) showChangeKey = false },
+                onChange = { keyNo, hex -> viewModel.changeKeyAesLab(keyNo, hex) },
+            )
+        }
+    }
+
+    if (showRestoreDump) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val dumpNames = remember { viewModel.listDumpFileNames() }
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (!ui.busy) {
+                    showRestoreDump = false
+                    viewModel.clearRestorePreview()
+                }
+            },
+            sheetState = sheetState,
+        ) {
+            RestoreDumpSheetContent(
+                dumpNames = dumpNames,
+                busy = ui.busy,
+                statusLine = ui.statusLine,
+                errorMessage = ui.errorMessage,
+                previewLines = ui.restorePreviewLines,
+                previewWarnings = ui.restorePreviewWarnings,
+                selectedFileName = ui.restorePreviewFileName,
+                onDismiss = {
+                    if (!ui.busy) {
+                        showRestoreDump = false
+                        viewModel.clearRestorePreview()
+                    }
+                },
+                onPreview = { name, formatFirst ->
+                    viewModel.previewRestoreDump(
+                        fileName = name,
+                        mode = DumpRestorePlanner.Mode.STRUCTURE_AND_DATA,
+                        formatFirst = formatFirst,
+                    )
+                },
+                onExecute = { name, formatFirst ->
+                    viewModel.executeRestoreDump(
+                        fileName = name,
+                        mode = DumpRestorePlanner.Mode.STRUCTURE_AND_DATA,
+                        formatFirst = formatFirst,
+                    )
+                },
             )
         }
     }
@@ -1475,6 +1550,228 @@ private fun CreateAppSheetContent(
             modifier = Modifier.fillMaxWidth(),
         ) {
             BusyLabel(busy = busy, text = stringResource(R.string.card_lab_create_app_action))
+        }
+        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.card_auth_cancel))
+        }
+    }
+}
+
+@Composable
+private fun ChangeKeyAesSheetContent(
+    selectedAidHex: String?,
+    busy: Boolean,
+    statusLine: String?,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onChange: (keyNo: Int, newKeyHex: String) -> Unit,
+) {
+    var keyNoText by rememberSaveable { mutableStateOf("0") }
+    var keyHex by rememberSaveable {
+        mutableStateOf(Hex.encode(AesConstants.FACTORY_KEY))
+    }
+    val justOk = statusLine?.startsWith("ChangeKey AES OK") == true && !busy
+    val clean = keyHex.replace(Regex("[^0-9a-fA-F]"), "")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 28.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.card_change_key_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(
+                R.string.card_change_key_hint,
+                prettyAid(selectedAidHex ?: "—"),
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = keyNoText,
+            onValueChange = { keyNoText = it.filter { c -> c.isDigit() }.take(2) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.card_change_key_slot)) },
+            singleLine = true,
+            enabled = !busy,
+        )
+        OutlinedTextField(
+            value = keyHex,
+            onValueChange = {
+                keyHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(32)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.card_upgrade_aes_new_key)) },
+            supportingText = { Text("${clean.length} / 32") },
+            singleLine = true,
+            enabled = !busy,
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        )
+        TextButton(
+            onClick = { keyHex = Hex.encode(AesConstants.FACTORY_KEY) },
+            enabled = !busy,
+        ) {
+            Text(stringResource(R.string.card_key_factory))
+        }
+        if (justOk && statusLine != null) {
+            Text(
+                text = statusLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (statusLine != null && busy) {
+            BusyLabel(busy = true, text = statusLine)
+        }
+        if (errorMessage != null) {
+            Text(errorMessage, color = MaterialTheme.colorScheme.error)
+        }
+        Button(
+            onClick = {
+                onChange(keyNoText.toIntOrNull()?.coerceIn(0, 13) ?: 0, clean)
+            },
+            enabled = !busy && clean.length == 32,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            BusyLabel(busy = busy, text = stringResource(R.string.card_change_key_action))
+        }
+        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.card_auth_cancel))
+        }
+    }
+}
+
+@Composable
+private fun RestoreDumpSheetContent(
+    dumpNames: List<String>,
+    busy: Boolean,
+    statusLine: String?,
+    errorMessage: String?,
+    previewLines: List<String>,
+    previewWarnings: List<String>,
+    selectedFileName: String?,
+    onDismiss: () -> Unit,
+    onPreview: (fileName: String, formatFirst: Boolean) -> Unit,
+    onExecute: (fileName: String, formatFirst: Boolean) -> Unit,
+) {
+    var selected by remember {
+        mutableStateOf(selectedFileName ?: dumpNames.firstOrNull().orEmpty())
+    }
+    var formatFirst by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 28.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.card_restore_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(R.string.card_restore_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (dumpNames.isEmpty()) {
+            Text(
+                text = stringResource(R.string.dumps_empty),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                text = stringResource(R.string.card_restore_pick),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            dumpNames.take(12).forEach { name ->
+                FilterChip(
+                    selected = selected == name,
+                    onClick = { selected = name },
+                    label = {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                        )
+                    },
+                    enabled = !busy,
+                )
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = formatFirst,
+                onCheckedChange = { formatFirst = it },
+                enabled = !busy,
+            )
+            Text(
+                text = stringResource(R.string.card_restore_format_first),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (previewWarnings.isNotEmpty()) {
+            previewWarnings.forEach { w ->
+                Text(
+                    text = "· $w",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+        }
+        if (previewLines.isNotEmpty()) {
+            Text(
+                text = stringResource(R.string.card_restore_plan, previewLines.size),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            previewLines.take(40).forEach { line ->
+                Text(
+                    text = "· $line",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (previewLines.size > 40) {
+                Text("… +${previewLines.size - 40}", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        if (statusLine != null && busy) {
+            BusyLabel(busy = true, text = statusLine)
+        }
+        if (statusLine != null && !busy && statusLine.startsWith("Restore")) {
+            Text(
+                text = statusLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (errorMessage != null) {
+            Text(errorMessage, color = MaterialTheme.colorScheme.error)
+        }
+        OutlinedButton(
+            onClick = { if (selected.isNotEmpty()) onPreview(selected, formatFirst) },
+            enabled = !busy && selected.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.card_restore_dry_run))
+        }
+        Button(
+            onClick = { if (selected.isNotEmpty()) onExecute(selected, formatFirst) },
+            enabled = !busy && selected.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            BusyLabel(busy = busy, text = stringResource(R.string.card_restore_execute))
         }
         TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.card_auth_cancel))

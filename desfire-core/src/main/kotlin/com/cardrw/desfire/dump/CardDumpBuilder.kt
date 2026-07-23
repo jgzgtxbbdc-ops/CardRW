@@ -4,6 +4,7 @@ import com.cardrw.desfire.model.ApplicationExploreResult
 import com.cardrw.desfire.model.CardIdentity
 import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.util.Hex
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.security.MessageDigest
@@ -98,6 +99,9 @@ object CardDumpBuilder {
 
     fun toPrettyJson(doc: CardDumpDocument): String = jsonPretty.encodeToString(doc)
 
+    fun parseJson(json: String): CardDumpDocument =
+        jsonPretty.decodeFromString(json)
+
     fun toHumanText(doc: CardDumpDocument): String = buildString {
         appendLine("CardRW dump v${doc.formatVersion}")
         appendLine("created: ${doc.createdAt}")
@@ -186,6 +190,8 @@ object CardDumpBuilder {
             commMode = s.commMode.label,
             sizeBytes = s.sizeBytes,
             accessRights = ar.compactLabel,
+            accessRightsRaw = ar.raw,
+            commModeWire = s.commMode.wire,
             dataStatus = status,
         )
     }

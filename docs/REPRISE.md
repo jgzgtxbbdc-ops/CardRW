@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-23 (create-file UX + polish dumps)  
+**Dernière mise à jour :** 2026-07-23 (K3 + ChangeKey AES UI + restore dump)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — dump toast/share + delete confirm  
+**Commit :** (voir `git log -1`) — K3 biométrie, ChangeKey AES sheet, restore dry-run/exec  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -20,7 +20,7 @@
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
 | **v0.6 UX** moniteur diagnostic écran Carte | ✅ **U0–U5** moniteur v0.6 clos |
 | **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
-| **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
+| **Coffre-fort de clés** | ✅ **K0–K3** — verrou biométrie/PIN optionnel (OFF défaut) |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
 | Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
 | **v1** Write / Create / ChangeKey / dumps | ✅ Write/Create/Delete ; ChangeKey AES+DES→AES ; FormatPICC ; **dumps moniteur** |
@@ -78,7 +78,7 @@
 | **K0** | Spec mécanique + sécu progressive + modèle données | ✅ |
 | **K1** | Meta + SecretStore persistant + CRUD + liste | ✅ |
 | **K2** | Sheet auth : dropdown **ou** hex + ☐ enregistrer | ✅ |
-| **K3** | Unlock biométrie / device credential optionnel | ⬜ |
+| **K3** | Unlock biométrie / device credential optionnel | ✅ OFF défaut · session 5 min |
 | **K4** | Polish (suggestions nom, récents, export…) | ⬜ |
 
 **Rappel :** slot carte 0–13 ≠ entrée coffre (nom → matériau). Anneau CDC §7.3 = statut sur la carte.
@@ -183,9 +183,9 @@ Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 - AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) K3 biométrie coffre — non prioritaire
-  B) Restauration dump (v1.2) — plus tard
-  C) ChangeKey AES UI (apps / non-DES) si besoin terrain
+  A) Terrain K3 + ChangeKey AES + restore dump
+  B) K4 polish coffre / templates v1.1
+  C) Value/Records si besoin métier
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -193,18 +193,19 @@ Ne pas committer clés prod / dumps réels / local.properties
 - Moniteur compact + labels EN + droits Proxmark `r: w: rw: ch:`
 - Create file : n° suivant auto, sheet ouverte, message OK
 - Dumps polish : toast export, Copier/Partager sur Carte, confirm delete liste
+- **K3** : verrou coffre biométrie/PIN (session 5 min), `VaultLockController`
+- **ChangeKey AES** UI moniteur (PICC + app), re-auth si slot courant
+- **Restore dump** : `DumpRestorePlanner` dry-run + exécution Carte (Format optionnel)
 
 ---
 
 ## Ordre de bataille recommandé (prochaine fois)
 
-1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
-2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — K3** biométrie coffre (optionnel).  
-   - **B — ChangeKey AES** exposé UI si besoin labo non-usine.  
+1. **`git pull`** + tests verts + **terrain** K3 / ChangeKey AES / restore labo.  
+2. Une piste : K4 coffre, templates v1.1, ou Value/Records.  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : dump moniteur **sans secrets** + share/copy livrés ; restore v1.2 plus tard.
+Avis fil rouge : restore **sans secrets** (usine AES) ; ChangeKey dump secrets hors scope.
 
 ---
 

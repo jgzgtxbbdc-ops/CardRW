@@ -19,7 +19,9 @@ import com.cardrw.desfire.client.DesfireTransportException
 import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.crypto.SecureMessagingLevel
 import com.cardrw.desfire.dump.CardDumpBuilder
+import com.cardrw.desfire.dump.DumpRestorePlanner
 import com.cardrw.desfire.model.Aid
+import com.cardrw.desfire.model.CommMode
 import com.cardrw.desfire.model.ApplicationExploreResult
 import com.cardrw.desfire.model.AuthBarrier
 import com.cardrw.desfire.model.AuthIntent
@@ -88,6 +90,12 @@ data class CardUiState(
      */
     val lastDumpJson: String? = null,
     val lastDumpFileName: String? = null,
+    /**
+     * Dry-run restore (CDC §8.5) — lignes + warnings pour sheet UI.
+     */
+    val restorePreviewLines: List<String> = emptyList(),
+    val restorePreviewWarnings: List<String> = emptyList(),
+    val restorePreviewFileName: String? = null,
     /**
      * Proposition d’enregistrer le matériau hex malgré un échec d’auth
      * (ex. bon secret, mauvais slot carte). Non null → dialog UI.
@@ -1554,6 +1562,382 @@ class CardViewModel @Inject constructor(
                 onFailure = { e -> handleOpFailure(e) },
             )
         }
+    }
+
+    /**
+     * ChangeKey AES (0xC4) — session AES EV1/EV2 (PICC ou app sélectionnée).
+     * Si on change le slot authentifié : session morte, re-auth auto avec la nouvelle clé.
+     */
+    fun changeKeyAesLab(keyNo: Int, newAesKeyHex: String) {
+        viewModelScope.launch {
+            val clean = newAesKeyHex.replace(Regex("[^0-9a-fA-F]"), "")
+            val newKey = try {
+                require(clean.length == 32) { "clé AES = 32 hex, got ${clean.length}" }
+                Hex.decode(clean)
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(errorMessage = "Nouvelle clé AES invalide : ${e.message}")
+                }
+                return@launch
+            }
+            val aid = _ui.value.selectedAidHex ?: run {
+                _ui.update { it.copy(errorMessage = "Sélectionne PICC ou une app d’abord.") }
+                return@launch
+            }
+            _ui.update {
+                it.copy(
+                    busy = true,
+                    errorMessage = null,
+                    statusLine = "ChangeKey AES slot $keyNo…",
+                )
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.ensureApplicationSelected(Aid.fromHex(aid))
+                    client.changeKeyAes(keyNo, newKey, keyVersion = 0)
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    val sessionKey = _ui.value.authSession?.keyNumber
+                    rememberAuth(aid, keyNo, newKey, vaultEntryId = null)
+                    factoryFailedSlotsByAid[aid.uppercase()]?.remove(keyNo)
+                    syncJournal()
+                    if (sessionKey == keyNo) {
+                        // Session morte — re-auth avec la nouvelle clé
+                        _ui.update {
+                            it.copy(
+                                authSession = null,
+                                statusLine = "ChangeKey AES OK — re-auth slot $keyNo…",
+                                keyHex = clean.uppercase(),
+                                keyNo = keyNo,
+                            )
+                        }
+                        val reauth = withContext(Dispatchers.IO) {
+                            withLiveClient { client ->
+                                client.ensureApplicationSelected(Aid.fromHex(aid))
+                                client.authenticateAesPreferEv1(keyNo, newKey, aid)
+                            }
+                        }
+                        reauth.fold(
+                            onSuccess = { sess ->
+                                _ui.update {
+                                    it.copy(
+                                        busy = false,
+                                        authSession = sess.toAuthSession(),
+                                        selectedAidHex = aid,
+                                        statusLine = "ChangeKey AES OK — session clé $keyNo",
+                                        authSuccessFlash = true,
+                                        authSuccessMessage = "ChangeKey AES k$keyNo",
+                                        errorMessage = null,
+                                    )
+                                }
+                                syncJournal()
+                                runExplore(aid, fillRemembered = true)
+                            },
+                            onFailure = { e ->
+                                _ui.update {
+                                    it.copy(
+                                        busy = false,
+                                        statusLine = "ChangeKey AES OK — re-auth à faire",
+                                        errorMessage = "Clé changée mais auth a échoué : ${e.message}",
+                                    )
+                                }
+                                syncJournal()
+                            },
+                        )
+                    } else {
+                        _ui.update {
+                            it.copy(
+                                busy = false,
+                                statusLine = "ChangeKey AES OK — slot $keyNo (session k$sessionKey intacte)",
+                                errorMessage = null,
+                            )
+                        }
+                    }
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
+    /** Liste des dumps locaux (noms) pour sheet restore. */
+    fun listDumpFileNames(): List<String> = dumpRepository.list().map { it.fileName }
+
+    /**
+     * Dry-run restore (CDC §8.5) — remplit [CardUiState.restorePreviewLines].
+     */
+    fun previewRestoreDump(
+        fileName: String,
+        mode: DumpRestorePlanner.Mode = DumpRestorePlanner.Mode.STRUCTURE_AND_DATA,
+        formatFirst: Boolean = false,
+    ) {
+        viewModelScope.launch {
+            try {
+                val json = withContext(Dispatchers.IO) { dumpRepository.readJson(fileName) }
+                    ?: error("Dump introuvable : $fileName")
+                val doc = CardDumpBuilder.parseJson(json)
+                val plan = DumpRestorePlanner.plan(doc, mode, formatFirst)
+                _ui.update {
+                    it.copy(
+                        restorePreviewFileName = fileName,
+                        restorePreviewLines = plan.steps.map { s -> s.label },
+                        restorePreviewWarnings = plan.warnings,
+                        errorMessage = null,
+                        statusLine = "Dry-run restore : ${plan.actionableCount} op(s) · $fileName",
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        errorMessage = "Dry-run restore : ${e.message}",
+                        restorePreviewLines = emptyList(),
+                        restorePreviewWarnings = emptyList(),
+                        restorePreviewFileName = null,
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearRestorePreview() {
+        _ui.update {
+            it.copy(
+                restorePreviewLines = emptyList(),
+                restorePreviewWarnings = emptyList(),
+                restorePreviewFileName = null,
+            )
+        }
+    }
+
+    /**
+     * Exécute le plan de restore sur la carte live (labo AES usine).
+     * Continue après erreur d’étape (note dans status) sauf FormatPICC KO fatal.
+     */
+    fun executeRestoreDump(
+        fileName: String,
+        mode: DumpRestorePlanner.Mode = DumpRestorePlanner.Mode.STRUCTURE_AND_DATA,
+        formatFirst: Boolean = false,
+    ) {
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "Restore dump…")
+            }
+            try {
+                val json = withContext(Dispatchers.IO) { dumpRepository.readJson(fileName) }
+                    ?: error("Dump introuvable : $fileName")
+                val doc = CardDumpBuilder.parseJson(json)
+                val plan = DumpRestorePlanner.plan(doc, mode, formatFirst)
+                val errors = mutableListOf<String>()
+                var done = 0
+
+                if (!ensurePiccMasterAesSession()) {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            errorMessage = "Restore : auth master PICC AES requise (usine 00…00 ou mémorisée).",
+                        )
+                    }
+                    return@launch
+                }
+
+                for (step in plan.steps) {
+                    when (step) {
+                        is DumpRestorePlanner.Step.Skip -> continue
+                        is DumpRestorePlanner.Step.FormatPicc -> {
+                            _ui.update { it.copy(statusLine = step.label) }
+                            val r = withContext(Dispatchers.IO) {
+                                withLiveClient { client ->
+                                    client.selectApplication(Aid.PICC)
+                                    client.formatPicc()
+                                }
+                            }
+                            if (r.isFailure) {
+                                _ui.update {
+                                    it.copy(
+                                        busy = false,
+                                        errorMessage = "FormatPICC KO : ${r.exceptionOrNull()?.message}",
+                                    )
+                                }
+                                return@launch
+                            }
+                            // Re-auth PICC après format
+                            if (!ensurePiccMasterAesSession()) {
+                                _ui.update {
+                                    it.copy(
+                                        busy = false,
+                                        errorMessage = "Format OK mais re-auth PICC a échoué.",
+                                    )
+                                }
+                                return@launch
+                            }
+                            done++
+                        }
+                        is DumpRestorePlanner.Step.CreateApplication -> {
+                            _ui.update { it.copy(statusLine = step.label) }
+                            if (!ensurePiccMasterAesSession()) {
+                                errors += "CreateApp ${step.aidHex} : pas de session PICC"
+                                continue
+                            }
+                            val r = withContext(Dispatchers.IO) {
+                                withLiveClient { client ->
+                                    client.selectApplication(Aid.PICC)
+                                    client.createApplication(
+                                        aid = Aid.fromHex(step.aidHex),
+                                        keySettings = step.keySettings,
+                                        maxKeys = step.maxKeys,
+                                        aesCrypto = true,
+                                    )
+                                }
+                            }
+                            if (r.isFailure) {
+                                errors += "CreateApp ${step.aidHex}: ${r.exceptionOrNull()?.message}"
+                            } else {
+                                done++
+                            }
+                        }
+                        is DumpRestorePlanner.Step.SelectApplication -> {
+                            _ui.update { it.copy(statusLine = step.label) }
+                            val ok = ensureAppMasterAesSession(step.aidHex)
+                            if (!ok) {
+                                errors += "Select/auth ${step.aidHex} KO"
+                            } else {
+                                done++
+                            }
+                        }
+                        is DumpRestorePlanner.Step.CreateStdDataFile -> {
+                            _ui.update { it.copy(statusLine = step.label) }
+                            if (!ensureAppMasterAesSession(step.aidHex)) {
+                                errors += "CreateFile ${step.aidHex}/F${step.fileNo} : auth KO"
+                                continue
+                            }
+                            val r = withContext(Dispatchers.IO) {
+                                withLiveClient { client ->
+                                    client.ensureApplicationSelected(Aid.fromHex(step.aidHex))
+                                    client.createStdDataFile(
+                                        fileNo = step.fileNo,
+                                        fileSize = step.sizeBytes,
+                                        commSettings = step.commSettings,
+                                        accessRights = step.accessRights,
+                                    )
+                                }
+                            }
+                            if (r.isFailure) {
+                                errors += "CreateFile ${step.aidHex}/F${step.fileNo}: ${r.exceptionOrNull()?.message}"
+                            } else {
+                                done++
+                            }
+                        }
+                        is DumpRestorePlanner.Step.WriteData -> {
+                            _ui.update { it.copy(statusLine = step.label) }
+                            if (!ensureAppMasterAesSession(step.aidHex)) {
+                                errors += "Write ${step.aidHex}/F${step.fileNo} : auth KO"
+                                continue
+                            }
+                            val bytes = Hex.decode(step.dataHex)
+                            // Free→PLAIN ; sinon FULL (labo Free le plus courant)
+                            val r = withContext(Dispatchers.IO) {
+                                withLiveClient { client ->
+                                    client.ensureApplicationSelected(Aid.fromHex(step.aidHex))
+                                    // Tente FULL puis PLAIN
+                                    try {
+                                        client.writeData(
+                                            step.fileNo,
+                                            bytes,
+                                            offset = 0,
+                                            commMode = CommMode.FULL,
+                                        )
+                                    } catch (_: Exception) {
+                                        client.writeData(
+                                            step.fileNo,
+                                            bytes,
+                                            offset = 0,
+                                            commMode = CommMode.PLAIN,
+                                        )
+                                    }
+                                }
+                            }
+                            if (r.isFailure) {
+                                errors += "Write ${step.aidHex}/F${step.fileNo}: ${r.exceptionOrNull()?.message}"
+                            } else {
+                                done++
+                            }
+                        }
+                    }
+                    syncJournal()
+                }
+
+                // Refresh identity + moniteur
+                refreshIdentityAfterStructureChange(restorePiccMaster = true)
+                val summary = "Restore OK — $done étape(s)" +
+                    if (errors.isEmpty()) "" else " · ${errors.size} erreur(s)"
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        statusLine = summary,
+                        errorMessage = errors.takeIf { e -> e.isNotEmpty() }
+                            ?.joinToString("\n")
+                            ?.take(500),
+                        restorePreviewFileName = fileName,
+                        restorePreviewLines = plan.steps.map { s -> s.label },
+                        restorePreviewWarnings = plan.warnings + errors.map { "ERR: $it" },
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        errorMessage = "Restore : ${e.message}",
+                    )
+                }
+            }
+        }
+    }
+
+    /** Auth master app (clé 0) usine ou mémorisée — pour CreateFile / Write restore. */
+    private suspend fun ensureAppMasterAesSession(aidHex: String): Boolean {
+        val aid = aidHex.uppercase()
+        val sess = _ui.value.authSession
+        if (sess?.authenticated == true &&
+            sess.aidHex.equals(aid, ignoreCase = true) &&
+            sess.keyNumber == 0 &&
+            sess.smLevel != SecureMessagingLevel.DES_LEGACY
+        ) {
+            return true
+        }
+        val remembered = rememberedKeysByAid[aid]?.get(0)
+        if (remembered != null) {
+            val ok = silentAuthThenExplore(
+                aidHex = aid,
+                remembered = remembered,
+                flashMessage = null,
+                fillRemembered = false,
+            )
+            if (ok) return true
+        }
+        val keyBytes = AesConstants.FACTORY_KEY.copyOf()
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.ensureApplicationSelected(Aid.fromHex(aid))
+                client.authenticateAesPreferEv1(0, keyBytes, aid)
+                client.authSession
+            }
+        }
+        return result.fold(
+            onSuccess = { session ->
+                rememberAuth(aid, 0, keyBytes, vaultEntryId = null)
+                _ui.update {
+                    it.copy(
+                        authSession = session,
+                        selectedAidHex = aid,
+                        errorMessage = null,
+                    )
+                }
+                syncJournal()
+                true
+            },
+            onFailure = { false },
+        )
     }
 
     /** CreateStdDataFile labo (FULL, droits Free 0xEEEE par défaut). */

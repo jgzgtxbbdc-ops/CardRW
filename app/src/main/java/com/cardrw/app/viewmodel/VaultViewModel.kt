@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.data.repository.KeyVaultNaming
 import com.cardrw.app.data.repository.KeyVaultRepository
+import com.cardrw.app.security.VaultLockController
 import com.cardrw.desfire.util.Hex
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,11 +20,16 @@ data class VaultUiState(
     val busy: Boolean = false,
     val errorMessage: String? = null,
     val statusMessage: String? = null,
+    /** K3 : option verrou biométrie / PIN. */
+    val lockEnabled: Boolean = false,
+    /** false si verrou ON et session expirée. */
+    val unlocked: Boolean = true,
 )
 
 @HiltViewModel
 class VaultViewModel @Inject constructor(
     private val keyVault: KeyVaultRepository,
+    private val vaultLock: VaultLockController,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(VaultUiState())
@@ -32,10 +38,47 @@ class VaultViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             keyVault.load()
+            refreshLockState()
             keyVault.entries.collect { list ->
                 _ui.update { it.copy(entries = list) }
+                refreshLockState()
             }
         }
+    }
+
+    fun refreshLockState() {
+        _ui.update {
+            it.copy(
+                lockEnabled = vaultLock.lockEnabled,
+                unlocked = vaultLock.isUnlocked(),
+            )
+        }
+    }
+
+    fun setLockEnabled(enabled: Boolean) {
+        vaultLock.lockEnabled = enabled
+        refreshLockState()
+        _ui.update {
+            it.copy(
+                statusMessage = if (enabled) {
+                    "Verrou coffre activé — biométrie / PIN avant usage des clés"
+                } else {
+                    "Verrou coffre désactivé"
+                },
+            )
+        }
+    }
+
+    fun onBiometricUnlocked() {
+        vaultLock.markUnlocked()
+        refreshLockState()
+        _ui.update { it.copy(statusMessage = "Coffre déverrouillé (5 min)", errorMessage = null) }
+    }
+
+    fun lockNow() {
+        vaultLock.lockNow()
+        refreshLockState()
+        _ui.update { it.copy(statusMessage = "Coffre verrouillé") }
     }
 
     fun nextDefaultName(): String = keyVault.nextDefaultName()

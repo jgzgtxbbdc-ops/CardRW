@@ -4,6 +4,7 @@ import android.content.Context
 import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.data.model.KeyVaultMetaFile
 import com.cardrw.app.security.SecretStore
+import com.cardrw.app.security.VaultLockController
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,7 @@ import javax.inject.Singleton
 class KeyVaultRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val secretStore: SecretStore,
+    private val vaultLock: VaultLockController,
 ) {
     private val mutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
@@ -106,8 +108,9 @@ class KeyVaultRepository @Inject constructor(
         _entries.value = withContext(Dispatchers.IO) { readMetaSortedUnlocked() }
     }
 
-    /** Charge le matériau et met à jour [lastUsedAt]. */
+    /** Charge le matériau et met à jour [lastUsedAt]. K3 : exige déverrouillage si activé. */
     suspend fun material(id: String): ByteArray = mutex.withLock {
+        vaultLock.requireUnlocked()
         val bytes = secretStore.get(aliasFor(id))
             ?: throw IllegalStateException("secret introuvable pour $id")
         require(bytes.size == KEY_SIZE) { "secret corrompu (${bytes.size} o)" }
@@ -121,6 +124,9 @@ class KeyVaultRepository @Inject constructor(
         }
         bytes.copyOf()
     }
+
+    fun isVaultLocked(): Boolean = !vaultLock.isUnlocked()
+    fun isVaultLockEnabled(): Boolean = vaultLock.lockEnabled
 
     private fun aliasFor(id: String) = "$ALIAS_PREFIX$id"
 
