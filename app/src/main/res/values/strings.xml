@@ -63,27 +63,36 @@
     <string name="card_auth_restored">Session restaurée (clé mémorisée)</string>
     <string name="card_auth_remembered_rejected">Clé mémorisée refusée — authentifie à nouveau.</string>
     <string name="card_no_apps">Aucune application (carte vierge)</string>
-    <!-- v1 labo structure / écriture -->
-    <string name="card_lab_create_title">Créer (labo)</string>
-    <string name="card_lab_create_subtitle">Nouvelle app ou nouveau fichier · carte sacrifiable</string>
-    <string name="card_lab_write_need_auth">Authentifie en AES pour créer ou écrire.</string>
-    <string name="card_lab_write_des_block">Session DES usine : création AES bloquée. Bascule master PICC en AES à venir, ou carte déjà AES.</string>
-    <string name="card_lab_create_app">Nouvelle application (PICC master AES)</string>
+    <!-- Structure / écriture contextuelle -->
     <string name="card_lab_aid_hex">AID (6 hex)</string>
     <string name="card_lab_create_app_action">Créer l’application</string>
-    <string name="card_lab_create_file_simple">Nouveau fichier Standard · n°%1$d (libre)</string>
+    <string name="card_lab_file_no">N° fichier</string>
     <string name="card_lab_file_size">Taille (octets)</string>
-    <string name="card_lab_create_file_action_simple">Créer le fichier %1$d</string>
-    <string name="card_lab_write_via_file">Pour écrire : bouton « Écrire… » sur un fichier de l’arbre.</string>
+    <string name="card_tree_add_app">Ajouter une application…</string>
+    <string name="card_tree_add_file">Ajouter un fichier…</string>
+    <string name="card_tree_delete_app">Supprimer l’app…</string>
     <string name="card_file_write_action">Écrire…</string>
+    <string name="card_file_delete_action">Supprimer…</string>
     <string name="card_write_sheet_title">Écrire le fichier %1$d</string>
-    <string name="card_write_sheet_current">Contenu actuel</string>
+    <string name="card_write_sheet_current">Contenu actuel (sur la carte)</string>
+    <string name="card_write_sheet_current_empty">— (pas encore lu)</string>
+    <string name="card_write_sheet_missing">Fichier introuvable dans l’explore courant.</string>
     <string name="card_write_sheet_use_current">Reprendre le contenu actuel</string>
     <string name="card_write_sheet_hex">Nouvelles données (hex)</string>
     <string name="card_write_sheet_replace_all">Remplacer tout le fichier (%1$d o) — pad 00 si plus court</string>
     <string name="card_write_sheet_partial_warn">Sans « remplacer tout », seuls les %1$d premiers octets changent ; le reste des %2$d o reste inchangé.</string>
     <string name="card_write_sheet_action_full">Écrire (fichier entier)</string>
     <string name="card_write_sheet_action_partial">Écrire %1$d o (partiel)</string>
+    <string name="card_create_app_sheet_title">Ajouter une application</string>
+    <string name="card_create_app_sheet_hint">PICC master AES requis. Settings labo ouverts (0x0F), crypto AES.</string>
+    <string name="card_create_file_sheet_title">Ajouter un fichier</string>
+    <string name="card_create_file_sheet_hint">Standard Data, FULL, droits Free (labo). MaxKeys / structure = session maître app.</string>
+    <string name="card_create_file_sheet_action">Créer le fichier</string>
+    <string name="card_delete_app_title">Supprimer l’application ?</string>
+    <string name="card_delete_app_message">AID %1$s sera effacée de la carte (irréversible).</string>
+    <string name="card_delete_file_title">Supprimer le fichier ?</string>
+    <string name="card_delete_file_message">Le fichier n°%1$d sera effacé de l’application (irréversible).</string>
+    <string name="card_delete_confirm">Supprimer</string>
     <string name="card_error">Erreur de lecture</string>
     <string name="card_raw_fields">Détail technique GetVersion</string>
     <string name="card_raw_fields_show">Afficher le détail technique</string>

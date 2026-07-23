@@ -810,6 +810,22 @@ class DesfireClient(
         exchangeAuthenticatedPlain(DesfireCommand.CREATE_STD_DATA_FILE, data)
     }
 
+    /** DeleteApplication (0xDA) — session PICC master AES. */
+    fun deleteApplication(aid: Aid) {
+        requireAesSessionForWrite()
+        exchangeAuthenticatedPlain(DesfireCommand.DELETE_APPLICATION, aid.bytes)
+    }
+
+    /** DeleteFile (0xDF) — session app avec droits structure. */
+    fun deleteFile(fileNo: Int) {
+        require(fileNo in 0..31) { "fileNo hors plage: $fileNo" }
+        requireAesSessionForWrite()
+        exchangeAuthenticatedPlain(
+            DesfireCommand.DELETE_FILE,
+            byteArrayOf(fileNo.toByte()),
+        )
+    }
+
     /**
      * ChangeKey (0xC4) AES — session **AES** (EV1/EV2), pas DES legacy.
      * Cas simple : changer une clé alors qu’on est authentifié (souvent maître 0).
@@ -1222,6 +1238,12 @@ class DesfireClient(
             DesfireCommand.CREATE_STD_DATA_FILE ->
                 if (data.isNotEmpty()) "CreateStdDataFile (fichier ${data[0].toInt() and 0xFF})"
                 else "CreateStdDataFile"
+            DesfireCommand.DELETE_APPLICATION ->
+                if (data.size >= 3) "DeleteApplication (${Hex.encode(data.copyOf(3))})"
+                else "DeleteApplication"
+            DesfireCommand.DELETE_FILE ->
+                if (data.isNotEmpty()) "DeleteFile (fichier ${data[0].toInt() and 0xFF})"
+                else "DeleteFile"
             DesfireCommand.CHANGE_KEY ->
                 if (data.isNotEmpty()) "ChangeKey (clé n°${data[0].toInt() and 0xFF})"
                 else "ChangeKey"

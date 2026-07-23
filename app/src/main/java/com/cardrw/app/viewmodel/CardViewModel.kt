@@ -1236,6 +1236,68 @@ class CardViewModel @Inject constructor(
         }
     }
 
+    /** DeleteApplication (PICC master AES). */
+    fun deleteApplicationLab(aidHex: String) {
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "DeleteApplication…")
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.deleteApplication(Aid.fromHex(aidHex))
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            statusLine = "DeleteApplication OK — $aidHex",
+                            errorMessage = null,
+                            selectedAidHex = if (it.selectedAidHex.equals(aidHex, true)) {
+                                "000000"
+                            } else {
+                                it.selectedAidHex
+                            },
+                            explore = null,
+                        )
+                    }
+                    syncJournal()
+                    refreshIdentityAfterStructureChange()
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
+    /** DeleteFile. */
+    fun deleteFileLab(fileNo: Int) {
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "DeleteFile $fileNo…")
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.deleteFile(fileNo)
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            statusLine = "DeleteFile OK — fichier $fileNo",
+                            errorMessage = null,
+                        )
+                    }
+                    syncJournal()
+                    _ui.value.selectedAidHex?.let { runExplore(it, fillRemembered = true) }
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
     private suspend fun refreshIdentityAfterStructureChange() {
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->

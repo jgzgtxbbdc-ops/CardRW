@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,8 +72,8 @@ fun DesfireCardTree(
     exploreByAid: Map<String, ApplicationExploreResult>,
     busy: Boolean,
     sessionKey: Int?,
-    /** true = session AES (pas DES) prête pour Write labo. */
-    writeEnabled: Boolean = false,
+    /** true = session AES (pas DES) prête pour Write / Create / Delete. */
+    structureEnabled: Boolean = false,
     friendlyName: (String) -> String?,
     onSelectPicc: () -> Unit,
     onDoubleSelectPicc: () -> Unit,
@@ -81,6 +82,10 @@ fun DesfireCardTree(
     onRefresh: () -> Unit,
     onAuthForFile: (FileNode) -> Unit,
     onWriteFile: (FileNode) -> Unit = {},
+    onAddApplication: () -> Unit = {},
+    onDeleteApplication: (aidHex: String) -> Unit = {},
+    onAddFile: () -> Unit = {},
+    onDeleteFile: (FileNode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val isPiccSelected = selectedAidHex.equals("000000", ignoreCase = true)
@@ -96,16 +101,6 @@ fun DesfireCardTree(
         )
         Text(
             text = stringResource(R.string.card_tree_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(R.string.card_tree_legend),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(R.string.card_tree_access_legend),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -141,12 +136,20 @@ fun DesfireCardTree(
                     } ?: run {
                         IncompleteHint(stringResource(R.string.card_tree_picc_pending))
                     }
+                    if (structureEnabled) {
+                        Button(
+                            onClick = onAddApplication,
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.card_tree_add_app))
+                        }
+                    }
                     RefreshRow(busy = busy, onRefresh = onRefresh)
                     piccExplore?.notes?.takeIf { it.isNotEmpty() }?.let { TreeNotes(it) }
                 }
             }
 
-            // Applications = enfants du PICC (toujours visibles sous la racine)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -177,12 +180,15 @@ fun DesfireCardTree(
                             explore = explore,
                             busy = busy,
                             sessionKey = sessionKey.takeIf { selected },
-                            writeEnabled = writeEnabled,
+                            structureEnabled = structureEnabled,
                             onSelect = { onSelectApp(hex) },
                             onDoubleSelect = { onDoubleSelectApp(hex) },
                             onRefresh = onRefresh,
                             onAuthForFile = onAuthForFile,
                             onWriteFile = onWriteFile,
+                            onDeleteApp = { onDeleteApplication(hex) },
+                            onAddFile = onAddFile,
+                            onDeleteFile = onDeleteFile,
                         )
                     }
                 }
@@ -200,12 +206,15 @@ private fun AppTreeNode(
     explore: ApplicationExploreResult?,
     busy: Boolean,
     sessionKey: Int?,
-    writeEnabled: Boolean,
+    structureEnabled: Boolean,
     onSelect: () -> Unit,
     onDoubleSelect: () -> Unit,
     onRefresh: () -> Unit,
     onAuthForFile: (FileNode) -> Unit,
     onWriteFile: (FileNode) -> Unit,
+    onDeleteApp: () -> Unit,
+    onAddFile: () -> Unit,
+    onDeleteFile: (FileNode) -> Unit,
 ) {
     val structureComplete = explore != null &&
         (explore.keySettings != null || explore.structureFromCache || explore.files.isNotEmpty() ||
@@ -294,9 +303,10 @@ private fun AppTreeNode(
                                 node = node,
                                 busy = busy,
                                 sessionKey = sessionKey,
-                                writeEnabled = writeEnabled,
+                                structureEnabled = structureEnabled,
                                 onAuthForRead = { onAuthForFile(node) },
                                 onWrite = { onWriteFile(node) },
+                                onDelete = { onDeleteFile(node) },
                             )
                         }
                     }
@@ -304,12 +314,28 @@ private fun AppTreeNode(
                         TreeNotes(explore.notes)
                     }
                 }
+                if (structureEnabled) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = onAddFile,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.card_tree_add_file))
+                        }
+                        OutlinedButton(
+                            onClick = onDeleteApp,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.card_tree_delete_app))
+                        }
+                    }
+                }
                 RefreshRow(busy = busy, onRefresh = onRefresh)
-                Text(
-                    text = stringResource(R.string.card_explore_hint_twophase),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
             }
         } else if (explore != null && explore.files.isNotEmpty()) {
             // Aperçu replié : compteur seulement (pas de détail fichiers hors sélection)
@@ -332,9 +358,10 @@ private fun FileTreeNode(
     node: FileNode,
     busy: Boolean,
     sessionKey: Int?,
-    writeEnabled: Boolean,
+    structureEnabled: Boolean,
     onAuthForRead: () -> Unit,
     onWrite: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     var expanded by rememberSaveable(node.fileNo) { mutableStateOf(false) }
     val rights = node.settings.accessRights
@@ -344,7 +371,7 @@ private fun FileTreeNode(
     val needsAuthForRead = node.dataHex == null && readPlan.barrier == AuthBarrier.NEEDS_KEY
     val neverRead = readPlan.barrier == AuthBarrier.NEVER
     val dataHex = node.dataHex
-    val canWrite = writeEnabled &&
+    val canWrite = structureEnabled &&
         (rights.isWriteFree || rights.canWriteWith(sessionKey))
     // Plein = contenu lu, Free, Never (état final), ou erreur connue
     val complete = dataHex != null ||
@@ -468,6 +495,14 @@ private fun FileTreeNode(
                         enabled = !busy,
                     ) {
                         Text(stringResource(R.string.card_file_write_action))
+                    }
+                }
+                if (structureEnabled) {
+                    TextButton(
+                        onClick = onDelete,
+                        enabled = !busy,
+                    ) {
+                        Text(stringResource(R.string.card_file_delete_action))
                     }
                 }
             }
