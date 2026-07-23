@@ -34,4 +34,10 @@ interface DesfireSecureSession {
 
     fun postprocessMetaResponse(responseData: ByteArray, sw2: Int): ByteArray =
         postprocessResponse(responseData, sw2, CommMode.PLAIN)
+
+    /**
+     * Zérote les clés / IV de session en mémoire (Select, re-auth, close).
+     * Après appel, ne plus utiliser la session.
+     */
+    fun wipeSecrets()
 }

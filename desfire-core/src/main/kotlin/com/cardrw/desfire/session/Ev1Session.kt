@@ -5,6 +5,7 @@ import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.crypto.DesfireCmac
 import com.cardrw.desfire.crypto.DesfireCrc32
 import com.cardrw.desfire.crypto.SecureMessagingLevel
+import com.cardrw.desfire.crypto.SensitiveBytes
 import com.cardrw.desfire.model.CommMode
 import com.cardrw.desfire.util.Hex
 
@@ -31,6 +32,11 @@ class Ev1Session private constructor(
         smLevel = smLevel,
         authenticated = true,
     )
+
+    override fun wipeSecrets() {
+        SensitiveBytes.wipe(sessionKey, iv)
+        cmac.wipeSecrets()
+    }
 
     /**
      * Prépare le payload commande (sans le framing 90…00).

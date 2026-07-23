@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-23 (K3 + ChangeKey AES UI + restore dump)  
+**Dernière mise à jour :** 2026-07-23 (spec P0 profils de clés)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — K3 biométrie, ChangeKey AES sheet, restore dry-run/exec  
+**Commit :** (voir `git log -1`) — + `docs/UX_PROFIL_CLES.md` (P0)  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -20,7 +20,8 @@
 | Tests `desfire-core` (FactoryKey + PrepareCommand) | ✅ BUILD SUCCESSFUL |
 | **v0.6 UX** moniteur diagnostic écran Carte | ✅ **U0–U5** moniteur v0.6 clos |
 | **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
-| **Coffre-fort de clés** | ✅ **K0–K3** — verrou biométrie/PIN optionnel (OFF défaut) |
+| **Coffre-fort de clés** | ✅ **K0–K4** — verrou biométrie/PIN optionnel (OFF défaut) |
+| **Profils de clés** (key set multi-slots) | ⬜ **P0 spec** [`UX_PROFIL_CLES.md`](UX_PROFIL_CLES.md) — P1+ à faire |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
 | Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
 | **v1** Write / Create / ChangeKey / dumps | ✅ Write/Create/Delete ; ChangeKey AES+DES→AES ; FormatPICC ; **dumps moniteur** |
@@ -81,7 +82,8 @@
 | **K3** | Unlock biométrie / device credential optionnel | ✅ OFF défaut · session 5 min |
 | **K4** | Polish (suggestions nom, reveal, export meta) | ✅ |
 
-**Rappel :** slot carte 0–13 ≠ entrée coffre (nom → matériau). Anneau CDC §7.3 = statut sur la carte.
+**Rappel :** slot carte 0–13 ≠ entrée coffre (nom → matériau). Anneau CDC §7.3 = statut sur la carte.  
+**Profils :** bindings slot×contexte → coffre — spec [`UX_PROFIL_CLES.md`](UX_PROFIL_CLES.md) (P0) ; ne pas confondre avec le coffre.
 
 ### Contrat crypto déjà livré (ne pas refaire)
 
@@ -147,7 +149,8 @@ git pull origin main
 
 - CDC : `docs/cahier-des-charges-desfire-ev3.md`  
 - **UX Carte (v0.6) :** `docs/UX_ECRAN_CARTE.md`  
-- **Coffre-fort (K0) :** `docs/UX_COFFRE_CLES.md`  
+- **Coffre-fort (K0–K4) :** `docs/UX_COFFRE_CLES.md`  
+- **Profils multi-clés (P0) :** `docs/UX_PROFIL_CLES.md`  
 - Labo : `docs/NOTES_LABO.md`  
 - Commandes : `docs/ANNEXE_A_COMMANDES.md`  
 - Cette note : `docs/REPRISE.md`
@@ -163,6 +166,7 @@ git log -1
 CDC : docs/cahier-des-charges-desfire-ev3.md
 UX Carte : docs/UX_ECRAN_CARTE.md   ← moniteur v0.6
 Coffre : docs/UX_COFFRE_CLES.md     ← noms de clés / SecretStore
+Profils : docs/UX_PROFIL_CLES.md    ← key set multi-slots (P0 spec)
 NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
@@ -183,9 +187,9 @@ Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 - AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) Templates v1.1 (si besoin série)
-  B) Value/Records
-  C) Polish moniteur / dettes crypto mineures
+  A) Profils P1 — modèle + écran CRUD bindings (UX_PROFIL_CLES.md) — recommandé
+  B) Profils P3 — capture « Enregistrer ce jeu » depuis session
+  C) Templates v1.1 / Value-Records
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -197,16 +201,22 @@ Ne pas committer clés prod / dumps réels / local.properties
 - **ChangeKey AES** UI moniteur (PICC + app), re-auth si slot courant
 - **Restore dump** : dry-run + exec ; DES→AES auto ; Write auth W/RW (pas master 0)
 - **K4** : reveal hex + copy, export meta sans secrets, suggestion nom `AID · kN · rôle`
+- **Dettes crypto mineures** : wipe session keys, KDoc CMAC IV, golden EV1 auth/Read/Write FULL
+- **P0** : spec profils multi-clés `docs/UX_PROFIL_CLES.md` (coffre ≠ profil ≠ anneau)
 
 ---
 
 ## Ordre de bataille recommandé (prochaine fois)
 
-1. **`git pull`** + tests verts + **terrain** K3 / ChangeKey AES / restore labo.  
-2. Une piste : K4 coffre, templates v1.1, ou Value/Records.  
+1. **`git pull`** + tests verts + terrain moniteur si besoin.  
+2. **Une** piste (ne pas tout mélanger) :
+   - **A — Profils P1** : `KeyProfile` + repo + écran bindings (réf. coffre).  
+   - **B — Profils P3** : capture depuis `rememberedKeysByAid`.  
+   - **C — P2** : `KeyMaterialResolver` branché moniteur.  
+   - **D — Templates / Value** si besoin métier.  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : restore **sans secrets** (usine AES) ; ChangeKey dump secrets hors scope.
+Avis fil rouge : **profils** pour dump/encode multi-clés sans resaisie ; restore secrets dump toujours hors scope.
 
 ---
 
@@ -232,13 +242,13 @@ Avis fil rouge : restore **sans secrets** (usine AES) ; ChangeKey dump secrets h
 ## Dettes notées (crypto / dettes code)
 
 - Auth EV2 **livré** (`authenticateEv2First` + fallback) — valider ReadData FULL EV2 terrain  
-- AuthenticateEV2NonFirst (`0x77`) non livré
-- KDoc CMAC (mute `iv`) si pas déjà clair  
-- Wipe clés session mémoire avant open source  
-- Golden auth + ReadData FULL versionné  
+- AuthenticateEV2NonFirst (`0x77`) non livré (re-auth même app sans First)
+- KDoc CMAC IV mutabilité ✅ (`DesfireCmac` + chaînage session)
+- Wipe clés session mémoire ✅ (`SensitiveBytes` + `wipeSecrets` / `clearSession`)
+- Golden auth + ReadData FULL versionné ✅ `ev1-auth-readdata-full-vectors.json`
+- README export / révélation hex explicite ✅  
 - Split restant `CardScreen` / `DesfireClient` quand wizards v1  
-- Veille concurrentielle avant gros investissement v1.1 templates  
-- README public explicite sur export clés en clair (jour open source)
+- Veille concurrentielle avant gros investissement v1.1 templates
 
 ---
 

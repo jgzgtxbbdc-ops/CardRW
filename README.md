@@ -46,7 +46,9 @@ Write, create app/fichier, templates, dumps, formatage, SM EV2.
 
 - **Jamais** de clés de production ni dumps réels dans le repo
 - Clé usine labo `00…00` proposée par défaut dans l’UI d’auth
-- Export dump/template avec secrets : responsabilité utilisateur (clair + avertissement)
+- **Export dump moniteur** : structure + données lues **sans** matériaux de clés ; le hex d’un dump n’est pas un secret de carte
+- **Export / révélation coffre** : le hex AES peut être copié **volontairement** (clair) — responsabilité utilisateur ; verrou biométrie (K3) optionnel
+- Sessions : clés zérotées en mémoire à l’invalidation (Select / re-auth / clear)
 - Cartes labo : voir CDC §14 et [`docs/NOTES_LABO.md`](docs/NOTES_LABO.md)
 
 ## Licence

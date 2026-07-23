@@ -4,7 +4,13 @@ package com.cardrw.desfire.crypto
  * CMAC AES-128 (NIST SP 800-38B) tel qu’utilisé par DESFire après AuthenticateAES
  * (schéma « new » / SM EV1 AES) — cf. libfreefare `cmac` / `cmac_generate_subkeys`.
  *
- * L’IV de session est **stateful** : chaque CMAC enchaîne sur l’IV précédent.
+ * ### IV de session (stateful)
+ * Chaque [compute] **mute** le buffer [iv] : après l’appel, `iv` contient le
+ * CMAC 16 o (dernier bloc ciphertext CBC). La session EV1 réutilise ce même
+ * tableau comme IV pour le CMAC / CBC suivant (chaînage freefare `session_iv`).
+ *
+ * Appelant : passer **toujours** l’IV de session (pas une copie jetable) si
+ * l’état doit avancer ; pour un one-shot (dérivation SV EV2) utiliser un IV zéro local.
  */
 class DesfireCmac(
     private val key: ByteArray,
@@ -20,8 +26,13 @@ class DesfireCmac(
     }
 
     /**
-     * Calcule le CMAC de [data] en partant de [iv] (modifié in-place → dernier bloc).
-     * @return 16 octets de CMAC (DESFire n’en utilise souvent que 8)
+     * Calcule le CMAC de [data].
+     *
+     * @param iv IV de session (16 o) — **modifié in-place** : devient le CMAC complet
+     *        (aligné freefare ; ne pas « protéger » l’IV avec une copie si le chaînage
+     *        session doit progresser).
+     * @return copie 16 o du CMAC (= contenu final de [iv]) ; DESFire n’en append
+     *         souvent que 8 o sur le fil.
      */
     fun compute(iv: ByteArray, data: ByteArray): ByteArray {
         require(iv.size == AesCbc.BLOCK)
@@ -44,9 +55,14 @@ class DesfireCmac(
             xorBlock(sk1, buffer, paddedLen - kbs)
         }
 
+        // cbcSend mute [iv] : après, iv = dernier bloc = CMAC
         AesCbc.cbcSend(key, iv, buffer)
-        // Après cbcSend, iv = dernier ciphertext = CMAC
         return iv.copyOf()
+    }
+
+    /** Zérote clé CMAC + sous-clés (fin de session). */
+    fun wipeSecrets() {
+        SensitiveBytes.wipe(key, sk1, sk2)
     }
 
     companion object {

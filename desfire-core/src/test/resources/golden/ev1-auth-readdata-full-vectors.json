@@ -1,0 +1,31 @@
+{
+  "name": "ev1-auth-readdata-full-vectors",
+  "description": "Vecteurs unitaires fixes (pas capture carte) — AuthenticateAES dérivation + SM EV1 PLAIN/FULL. Clé usine labo uniquement.",
+  "lab_only": true,
+  "auth_key_hex": "00000000000000000000000000000000",
+  "rnd_a_hex": "00112233445566778899AABBCCDDEEFF",
+  "rnd_b_hex": "FFEEDDCCBBAA99887766554433221100",
+  "session_key_hex": "00112233FFEEDDCCCCDDEEFF33221100",
+  "notes": [
+    "session_key = RndA[0..3]||RndB[0..3]||RndA[12..15]||RndB[12..15]",
+    "ReadData TX en FULL fichier reste CommMode.PLAIN (FileNo||Offset||Length en clair + CMAC IV)",
+    "WriteData FULL : clearHeaderLength=7, corps chiffré AES-CBC session + CRC32"
+  ],
+  "vectors": {
+    "read_data_tx_plain": {
+      "opcode": "BD",
+      "mode": "PLAIN",
+      "params_hex": "00000000100000",
+      "tx_data_hex": "00000000100000",
+      "comment": "file 0, off 0, len 16 LE — payload inchangé"
+    },
+    "write_data_full_header7": {
+      "opcode": "3D",
+      "mode": "FULL",
+      "clear_header_length": 7,
+      "header_hex": "01000000040000",
+      "body_hex": "DEADBEEF",
+      "comment": "file 1, off 0, len 4 ; header clair + 16 o cipher (body+CRC+pad)"
+    }
+  }
+}

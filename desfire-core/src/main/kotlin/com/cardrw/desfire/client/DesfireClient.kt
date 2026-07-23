@@ -46,7 +46,7 @@ class DesfireClient(
     private val sessionId: String? = null,
     private val random: SecureRandom = SecureRandom(),
 ) {
-    /** Session AES EV1 ou EV2 courante — null si non authentifié. */
+    /** Session AES EV1 / EV2 / DES legacy courante — null si non authentifié. */
     var session: DesfireSecureSession? = null
         private set
 
@@ -58,6 +58,21 @@ class DesfireClient(
         get() = session?.toAuthSession()
 
     val isAuthenticated: Boolean get() = session != null
+
+    /**
+     * Invalide la session et **zérote** les clés en mémoire (Select, re-auth, close).
+     */
+    fun clearSession() {
+        session?.wipeSecrets()
+        session = null
+    }
+
+    private fun setSession(newSession: DesfireSecureSession) {
+        if (session !== newSession) {
+            session?.wipeSecrets()
+            session = newSession
+        }
+    }
 
     /** Select seulement si l’AID courant diffère (évite les doubles 5A dans le journal). */
     fun ensureApplicationSelected(aid: Aid) {
@@ -179,7 +194,7 @@ class DesfireClient(
 
     fun selectApplication(aid: Aid): DesfireResponse {
         // Select invalide toujours la session auth (CDC §3.2)
-        session = null
+        clearSession()
         val response = exchange(DesfireCommand.SELECT_APPLICATION, aid.bytes)
         if (!response.isSuccess) {
             selectedAid = null
@@ -277,7 +292,7 @@ class DesfireClient(
         }
         require(keyNo in 0..13) { "keyNo hors plage 0–13: $keyNo" }
 
-        session = null
+        clearSession()
         val iv = AesCbc.zeroIv()
 
         // 1) AA + keyNo → ek(RndB) + 91 AF
@@ -334,7 +349,7 @@ class DesfireClient(
         }
 
         val newSession = Ev1Session.create(aidHex, keyNo, hostRndA, rndB)
-        session = newSession
+        setSession(newSession)
         return newSession
     }
 
@@ -354,7 +369,7 @@ class DesfireClient(
         }
         require(keyNo in 0..13) { "keyNo hors plage 0–13: $keyNo" }
 
-        session = null
+        clearSession()
         val block = DesCipher.BLOCK
 
         // 1) 0A + keyNo → ek(RndB) 8 o + AF
@@ -416,7 +431,7 @@ class DesfireClient(
             authKey = key.copyOf(),
             sessionKey = sessionKey,
         )
-        session = newSession
+        setSession(newSession)
         return newSession
     }
 
@@ -448,7 +463,7 @@ class DesfireClient(
             "LenCap=0 sans PCDCap2, ou LenCap=6 avec 6 o"
         }
 
-        session = null
+        clearSession()
         val iv = AesCbc.zeroIv()
 
         // 1) 71 KeyNo LenCap [PCDCap2] → ek(RndB) + AF
@@ -512,7 +527,7 @@ class DesfireClient(
             rndB = rndB,
             ti = ti,
         )
-        session = newSession
+        setSession(newSession)
         return newSession
     }
 
@@ -615,10 +630,6 @@ class DesfireClient(
             st == DesfireStatus.PERMISSION_DENIED ||
             msg.contains("Illegal", ignoreCase = true) ||
             msg.contains("0x1C", ignoreCase = true)
-    }
-
-    fun clearSession() {
-        session = null
     }
 
     // -------------------------------------------------------------------------
@@ -849,7 +860,7 @@ class DesfireClient(
         }
         // SM plain + CMAC (comme CreateApplication / freefare FormatPICC)
         exchangeAuthenticatedPlain(DesfireCommand.FORMAT_PICC, ByteArray(0))
-        session = null
+        clearSession()
     }
 
     /** DeleteApplication (0xDA) — session PICC master AES. */
@@ -908,7 +919,7 @@ class DesfireClient(
         }
         // Si on a changé la clé de session courante, l’auth est morte côté carte
         if (sess.keyNumber == keyNo) {
-            session = null
+            clearSession()
         }
     }
 
@@ -955,7 +966,7 @@ class DesfireClient(
             )
         }
         // Clé de session changée → auth morte
-        session = null
+        clearSession()
     }
 
     private fun requireAesSessionForWrite(): DesfireSecureSession {

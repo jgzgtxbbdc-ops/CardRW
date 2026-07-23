@@ -4,6 +4,7 @@ import com.cardrw.desfire.crypto.DesCipher
 import com.cardrw.desfire.crypto.DesConstants
 import com.cardrw.desfire.crypto.Iso14443aCrc16
 import com.cardrw.desfire.crypto.SecureMessagingLevel
+import com.cardrw.desfire.crypto.SensitiveBytes
 import com.cardrw.desfire.model.CommMode
 
 /**
@@ -34,6 +35,10 @@ class DesLegacySession(
         smLevel = smLevel,
         authenticated = true,
     )
+
+    override fun wipeSecrets() {
+        SensitiveBytes.wipe(authKey, sessionKey)
+    }
 
     override fun prepareCommand(
         opcode: Int,

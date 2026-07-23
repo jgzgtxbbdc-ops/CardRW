@@ -4,6 +4,7 @@ import com.cardrw.desfire.crypto.AesCbc
 import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.crypto.DesfireCmac
 import com.cardrw.desfire.crypto.SecureMessagingLevel
+import com.cardrw.desfire.crypto.SensitiveBytes
 import com.cardrw.desfire.model.CommMode
 import com.cardrw.desfire.util.Hex
 
@@ -42,6 +43,10 @@ class Ev2Session private constructor(
         smLevel = smLevel,
         authenticated = true,
     )
+
+    override fun wipeSecrets() {
+        SensitiveBytes.wipe(encKey, macKey, ti)
+    }
 
     /**
      * Prépare le data field APDU (sans opcode).
