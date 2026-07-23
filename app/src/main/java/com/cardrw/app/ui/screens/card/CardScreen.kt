@@ -609,15 +609,21 @@ private fun ReadyMonitor(
         )
     }
 
-    // Fermer sheets create / upgrade après succès
+    // Fermer sheets create après succès (statusLine stable)
     LaunchedEffect(ui.busy, ui.statusLine, ui.errorMessage) {
         if (!ui.busy && ui.errorMessage == null) {
             when {
                 ui.statusLine?.startsWith("CreateApplication OK") == true -> showCreateApp = false
                 ui.statusLine?.startsWith("CreateStdDataFile OK") == true -> showCreateFile = false
-                ui.statusLine?.startsWith("Master PICC basculée en AES") == true ->
-                    showUpgradeAes = false
             }
+        }
+    }
+
+    // Upgrade AES : fermer dès que la session n’est plus DES (succès ou re-auth AES).
+    // Ne pas s’appuyer sur statusLine — runExplore l’écrase immédiatement après la bascule.
+    LaunchedEffect(desToAesEnabled, showUpgradeAes) {
+        if (showUpgradeAes && !desToAesEnabled) {
+            showUpgradeAes = false
         }
     }
 }
