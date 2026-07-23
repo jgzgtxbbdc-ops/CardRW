@@ -185,7 +185,7 @@ object CardDumpBuilder {
             type = s.fileType.label,
             commMode = s.commMode.label,
             sizeBytes = s.sizeBytes,
-            accessRights = "R=${ar.readLabel}/W=${ar.writeLabel}/RW=${ar.readWriteLabel}/Ch=${ar.changeLabel}",
+            accessRights = ar.compactLabel,
             dataStatus = status,
         )
     }

@@ -47,8 +47,8 @@
 - Coffre : dialog « enregistrer quand même » si auth KO + option cochée
 
 **U5b — moniteur compact + termes techniques EN :**
-- Ligne fichier : `F0 · Std · 16B · FULL · R1/W2/RW2/Ch0` (+ badge)
-- Droits : `k1` / compact `R1/W2…` (E=Free, N=Never) ; comm PLAIN/MAC/FULL
+- Ligne fichier : `F0 · Std · 16B · FULL · r:1 w:2 rw:2 ch:0` (+ badge)
+- Droits **Proxmark-like** : `r: w: rw: ch:` + free/never/n° ; comm PLAIN/MAC/FULL
 - CTA en ligne : `Auth k1` · `Write` · `Del` (plus de multi-lignes FR)
 
 **U4 livré :**

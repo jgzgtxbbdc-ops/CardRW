@@ -51,17 +51,23 @@ data class AccessRights(
     val change: Int,
     val raw: Int,
 ) {
-    /** Libellé court EN : Free / Never / k0…k13. */
+    /**
+     * Valeur isolée (messages / dumps) : free / never / k0…k13.
+     * Le n° de slot garde le préfixe `k` pour coller aux CTA « Auth k1 ».
+     */
     fun describe(key: Int): String = when (key and 0x0F) {
-        0x0E -> "Free"
-        0x0F -> "Never"
+        0x0E -> "free"
+        0x0F -> "never"
         else -> "k${key and 0x0F}"
     }
 
-    /** Encore plus compact pour une ligne moniteur : E / N / 0…13. */
-    fun describeDigit(key: Int): String = when (key and 0x0F) {
-        0x0E -> "E"
-        0x0F -> "N"
+    /**
+     * Valeur Proxmark (`hf mfdes`) pour un nibble de droits :
+     * free / never / 0…13 (chiffre nu, comme `r: free w: key 0x00` → on compresse en `r:free ch:0`).
+     */
+    fun describeProx(key: Int): String = when (key and 0x0F) {
+        0x0E -> "free"
+        0x0F -> "never"
         else -> "${key and 0x0F}"
     }
 
@@ -70,10 +76,13 @@ data class AccessRights(
     val readWriteLabel: String get() = describe(readWrite)
     val changeLabel: String get() = describe(change)
 
-    /** Une ligne : R1/W2/RW2/Ch0 (E=Free, N=Never). */
+    /**
+     * Ligne moniteur style Proxmark3 : `r:1 w:2 rw:2 ch:0`
+     * (ordre NXP / freefare MDAR : read, write, read_write, change).
+     */
     val compactLabel: String
-        get() = "R${describeDigit(read)}/W${describeDigit(write)}/" +
-            "RW${describeDigit(readWrite)}/Ch${describeDigit(change)}"
+        get() = "r:${describeProx(read)} w:${describeProx(write)} " +
+            "rw:${describeProx(readWrite)} ch:${describeProx(change)}"
 
     val isReadFree: Boolean get() = (read and 0x0F) == 0x0E
     val isReadNever: Boolean get() = (read and 0x0F) == 0x0F
@@ -168,7 +177,7 @@ data class FileSettings(
     val isStandard: Boolean get() = fileType == FileType.STANDARD
     /**
      * Ligne moniteur compacte EN : `F0 · Std · 16B · FULL`.
-     * Droits à part via [AccessRights.compactLabel].
+     * Droits à part via [AccessRights.compactLabel] (Proxmark-like).
      */
     val summaryLabel: String
         get() = buildString {
@@ -177,7 +186,7 @@ data class FileSettings(
             append(" · ${commMode.label}")
         }
 
-    /** Une seule ligne titre + droits : `F0 · Std · 16B · FULL · R1/W2/RW2/Ch0`. */
+    /** Titre + droits Proxmark : `F0 · Std · 16B · FULL · r:1 w:2 rw:2 ch:0`. */
     val compactLine: String
         get() = "$summaryLabel · ${accessRights.compactLabel}"
 

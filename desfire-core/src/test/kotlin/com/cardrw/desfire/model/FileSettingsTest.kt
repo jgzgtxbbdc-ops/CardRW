@@ -17,7 +17,8 @@ class FileSettingsTest {
         assertEquals(CommMode.PLAIN, fs.commMode)
         assertEquals(32, fs.sizeBytes)
         assertEquals(0x0E, fs.accessRights.read)
-        assertEquals("Free", fs.accessRights.readLabel)
+        assertEquals("free", fs.accessRights.readLabel)
+        assertEquals("r:free w:free rw:free ch:free", fs.accessRights.compactLabel)
         assertTrue(fs.isStandard)
     }
 
@@ -30,7 +31,7 @@ class FileSettingsTest {
         assertEquals(256, fs.sizeBytes)
         assertEquals(0, fs.accessRights.read)
         assertEquals("k0", fs.accessRights.readLabel)
-        assertEquals("F1 · Std · 256B · FULL · R0/W0/RW0/Ch0", fs.compactLine)
+        assertEquals("F1 · Std · 256B · FULL · r:0 w:0 rw:0 ch:0", fs.compactLine)
     }
 
     @Test
@@ -43,6 +44,7 @@ class FileSettingsTest {
         assertEquals(2, ar.write)
         assertEquals(2, ar.readWrite)
         assertEquals(0, ar.change)
+        assertEquals("r:1 w:2 rw:2 ch:0", ar.compactLabel)
         assertTrue(ar.canReadWith(1)) // R
         assertTrue(ar.canReadWith(2)) // RW
         assertFalse(ar.canReadWith(0))
@@ -67,7 +69,7 @@ class FileSettingsTest {
     fun access_rights_never() {
         val ar = AccessRights.parse(0xF0F0)
         assertEquals(0x0F, ar.read)
-        assertEquals("Never", ar.readLabel)
+        assertEquals("never", ar.readLabel)
         assertEquals(0x00, ar.write)
         assertEquals(0x0F, ar.readWrite)
         assertEquals(0x00, ar.change)

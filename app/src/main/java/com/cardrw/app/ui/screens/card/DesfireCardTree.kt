@@ -437,7 +437,7 @@ private fun FileTreeNode(
         accent = MaterialTheme.colorScheme.secondary,
         nested = true,
     ) {
-        // Une ligne : F0 · Std · 16B · FULL · R1/W2/RW2/Ch0  [OK]
+        // Une ligne : F0 · Std · 16B · FULL · r:1 w:2 rw:2 ch:0  [OK]
         Row(
             modifier = Modifier
                 .fillMaxWidth()
