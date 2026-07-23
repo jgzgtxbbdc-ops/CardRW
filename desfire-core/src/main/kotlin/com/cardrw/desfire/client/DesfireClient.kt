@@ -408,7 +408,13 @@ class DesfireClient(
             )
         }
 
-        val newSession = DesLegacySession(aidHex, keyNo, key.copyOf())
+        val sessionKey = DesLegacySession.deriveSessionKey(hostRndA, rndB, key)
+        val newSession = DesLegacySession(
+            aidHex = aidHex,
+            keyNumber = keyNo,
+            authKey = key.copyOf(),
+            sessionKey = sessionKey,
+        )
         session = newSession
         return newSession
     }
@@ -870,6 +876,52 @@ class DesfireClient(
         }
     }
 
+    /**
+     * ChangeKey (0xC4) **DES legacy → AES-128** — bascule master PICC carte vierge.
+     *
+     * Prérequis : session [DesLegacySession] (AuthenticateDES 0x0A), typiquement
+     * PICC `000000` + clé usine 00…00, slot authentifié = [keyNo] (souvent 0).
+     *
+     * Après succès la session DES est invalidée : re-auth AES avec [newAesKey].
+     *
+     * @param keyNo slot à basculer (0 = master PICC)
+     * @param newAesKey AES-128 (16 o) — labo souvent [AesConstants.FACTORY_KEY]
+     * @param keyVersion version AES stockée (souvent 0)
+     */
+    fun changeKeyDesToAes(
+        keyNo: Int,
+        newAesKey: ByteArray,
+        keyVersion: Int = 0,
+    ) {
+        require(keyNo in 0..13)
+        require(newAesKey.size == AesConstants.KEY_SIZE_BYTES) {
+            "nouvelle clé AES 16 o, got ${newAesKey.size}"
+        }
+        val sess = session as? DesLegacySession
+            ?: throw DesfireProtocolException(
+                "ChangeKey DES→AES : authentifie d’abord en DES (0x0A) sur le PICC " +
+                    "(carte vierge usine, clé master DES).",
+            )
+        if ((sess.keyNumber and 0x0F) != (keyNo and 0x0F)) {
+            throw DesfireProtocolException(
+                "ChangeKey DES→AES labo : change le slot authentifié " +
+                    "(session clé ${sess.keyNumber}, demandé $keyNo). " +
+                    "Cas « autre clé » (XOR + double CRC) non livré.",
+            )
+        }
+        val tx = sess.prepareChangeKeyDesToAes(keyNo, newAesKey, keyVersion)
+        val response = exchange(DesfireCommand.CHANGE_KEY, tx)
+        if (!response.isSuccess) {
+            throw DesfireProtocolException(
+                "ChangeKey DES→AES ($keyNo) failed: ${response.status.shortName} — " +
+                    "${response.status.pedagogicalFr}",
+                response,
+            )
+        }
+        // Clé de session changée → auth morte
+        session = null
+    }
+
     private fun requireAesSessionForWrite(): DesfireSecureSession {
         val sess = session
             ?: throw DesfireProtocolException(
@@ -877,9 +929,9 @@ class DesfireClient(
             )
         if (sess.smLevel == SecureMessagingLevel.DES_LEGACY) {
             throw DesfireProtocolException(
-                "Session DES usine (carte vierge) : Write/Create/ChangeKey AES non disponibles ici. " +
-                    "Il faut d’abord basculer la master PICC en AES (ChangeKey DES→AES — prochaine tranche) " +
-                    "ou utiliser une carte déjà en AES.",
+                "Session DES usine (carte vierge) : Write/Create nécessitent d’abord " +
+                    "basculer la master PICC en AES (bouton « Basculer master en AES » " +
+                    "sur le nœud PICC), ou une carte déjà en AES.",
             )
         }
         return sess

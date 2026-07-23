@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-22 (v1 labo Write/Create)  
+**Dernière mise à jour :** 2026-07-23 (ChangeKey DES→AES)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — WriteData + Create + UI labo  
+**Commit :** (voir `git log -1`) — ChangeKey DES→AES PICC + sheet moniteur  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -23,7 +23,7 @@
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
 | Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
-| **v1** Write / Create / ChangeKey / dumps | 🔄 **API + UI labo** Write/Create (AES) ; ChangeKey AES ; DES→AES ChangeKey à faire |
+| **v1** Write / Create / ChangeKey / dumps | 🔄 Write/Create/Delete ✅ ; ChangeKey AES ✅ ; **ChangeKey DES→AES** ✅ ; FormatPICC / dumps ⬜ |
 
 ### v0.6 UX — moniteur Carte
 
@@ -115,8 +115,8 @@ Conventions v1 (à utiliser dès Write/ChangeKey) :
 
 Tests : `FactoryKeyTest`, `Ev1SessionPrepareCommandTest`.
 
-**Promesse produit actuelle :** lecteur DESFire pédagogique + auth + lecture fichiers protégés + moniteur arbre.  
-**Pas encore :** écriture, templates, série, formatage, SM EV2, open source.
+**Promesse produit actuelle :** lecteur DESFire pédagogique + auth AES/DES + moniteur arbre + Write/Create/Delete + bascule DES→AES PICC.  
+**Pas encore :** FormatPICC, dumps, templates, série, open source.
 
 ---
 
@@ -168,10 +168,14 @@ NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
 Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 
+État récent : DES usine PICC + Write/Create/Delete arbre + ChangeKey DES→AES
+  (session DES → bascule master AES → re-auth AES auto).
+
 Prochaine tâche (une seule par session) :
-  A) Campagne parc EV2 (cocher docs/ARBITRAGE_EV2.md §6) puis v1 Write
-  B) v1 WriteData (header=7, carte sacrifiable) — EV1 validé labo
-  C) K3 biométrie coffre — non prioritaire
+  A) Terrain : valider ChangeKey DES→AES sur carte vierge sacrifiable
+  B) FormatPICC (0xFC) labo
+  C) Dumps / export structure
+  D) K3 biométrie coffre — non prioritaire
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -181,12 +185,13 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — Parc EV2** : cocher checklist `docs/ARBITRAGE_EV2.md` (labo déjà EV1).  
-   - **B — v1 Write** : header=7 ; carte sacrifiable ; SM de la session courante.  
-   - **C — K3** biométrie coffre (optionnel).  
+   - **A — Terrain DES→AES** : PICC DES usine → bascule AES 00…00 → Create app.  
+   - **B — FormatPICC** `0xFC` (session AES master).  
+   - **C — Dumps** export arbre / hex.  
+   - **D — K3** biométrie coffre (optionnel).  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : moniteur clos + **EV2 code OK** ; Write EV1 labo possible ; valider parc si EV3 neuves.
+Avis fil rouge : cycle carte vierge **auth DES → ChangeKey AES → Create/Write** livré en code ; **valider terrain**.
 
 ---
 

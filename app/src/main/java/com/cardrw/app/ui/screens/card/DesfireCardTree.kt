@@ -74,6 +74,11 @@ fun DesfireCardTree(
     sessionKey: Int?,
     /** true = session AES (pas DES) prête pour Write / Create / Delete. */
     structureEnabled: Boolean = false,
+    /**
+     * true = session DES legacy sur PICC : proposer bascule master DES→AES
+     * (Create/Write bloqués tant que non AES).
+     */
+    desToAesEnabled: Boolean = false,
     friendlyName: (String) -> String?,
     onSelectPicc: () -> Unit,
     onDoubleSelectPicc: () -> Unit,
@@ -83,6 +88,7 @@ fun DesfireCardTree(
     onAuthForFile: (FileNode) -> Unit,
     onWriteFile: (FileNode) -> Unit = {},
     onAddApplication: () -> Unit = {},
+    onUpgradePiccToAes: () -> Unit = {},
     onDeleteApplication: (aidHex: String) -> Unit = {},
     onAddFile: () -> Unit = {},
     onDeleteFile: (FileNode) -> Unit = {},
@@ -135,6 +141,20 @@ fun DesfireCardTree(
                         KeySettingsMetaNode(ks = ks, domainLabel = stringResource(R.string.card_tree_picc_meta))
                     } ?: run {
                         IncompleteHint(stringResource(R.string.card_tree_picc_pending))
+                    }
+                    if (desToAesEnabled) {
+                        Text(
+                            text = stringResource(R.string.card_tree_upgrade_aes_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(
+                            onClick = onUpgradePiccToAes,
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.card_tree_upgrade_aes))
+                        }
                     }
                     if (structureEnabled) {
                         Button(

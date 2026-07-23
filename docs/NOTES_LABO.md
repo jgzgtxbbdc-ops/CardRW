@@ -113,7 +113,8 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **DES usine PICC** — AuthenticateDES `0x0A` 2KTDEA 00…00 (carte vierge NXP ; AES échoue = normal)
 - [ ] Campagne parc EV2 (checklist §6 ARBITRAGE_EV2)
 - [x] **v1 API labo** — WriteData (header=7 FULL), CreateApplication, CreateStdDataFile, ChangeKey AES (`e146933+`)
-- [ ] Terrain Write/Create sur carte AES sacrifiable
-- [ ] ChangeKey DES→AES (PICC vierge) + dumps
+- [x] Terrain Write/Create/Delete + sheets arbre (Free→PLAIN, pad optionnel)
+- [x] **ChangeKey DES→AES** PICC vierge (`prepareChangeKeyDesToAes` + sheet moniteur)
+- [ ] FormatPICC + dumps
 
 Voir aussi `docs/REPRISE.md`, `docs/UX_ECRAN_CARTE.md`, `docs/UX_COFFRE_CLES.md`.

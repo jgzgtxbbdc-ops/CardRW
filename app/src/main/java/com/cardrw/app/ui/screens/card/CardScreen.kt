@@ -197,6 +197,7 @@ private fun ReadyMonitor(
     var writeFileNo by remember { mutableStateOf<Int?>(null) }
     var showCreateApp by remember { mutableStateOf(false) }
     var showCreateFile by remember { mutableStateOf(false) }
+    var showUpgradeAes by remember { mutableStateOf(false) }
     var deleteAppAid by remember { mutableStateOf<String?>(null) }
     var deleteFileNo by remember { mutableStateOf<Int?>(null) }
     // U5 : conserver / restaurer la position de scroll après auth / explore
@@ -205,6 +206,9 @@ private fun ReadyMonitor(
     val structureEnabled = authenticated &&
         ui.authSession?.smLevel != SecureMessagingLevel.DES_LEGACY &&
         ui.authSession?.smLevel != SecureMessagingLevel.NONE
+    val desToAesEnabled = authenticated &&
+        ui.authSession?.smLevel == SecureMessagingLevel.DES_LEGACY &&
+        ui.selectedAidHex.equals("000000", ignoreCase = true)
     val liveWriteNode = writeFileNo?.let { no ->
         ui.explore?.files?.find { it.fileNo == no }
     }
@@ -366,6 +370,7 @@ private fun ReadyMonitor(
                 busy = ui.busy,
                 sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber,
                 structureEnabled = structureEnabled,
+                desToAesEnabled = desToAesEnabled,
                 friendlyName = viewModel::friendlyName,
                 onSelectPicc = {
                     viewModel.selectApplication("000000", tryDefaultAuth = false)
@@ -387,6 +392,7 @@ private fun ReadyMonitor(
                 },
                 onWriteFile = { node -> writeFileNo = node.fileNo },
                 onAddApplication = { showCreateApp = true },
+                onUpgradePiccToAes = { showUpgradeAes = true },
                 onDeleteApplication = { aid -> deleteAppAid = aid },
                 onAddFile = { showCreateFile = true },
                 onDeleteFile = { node -> deleteFileNo = node.fileNo },
@@ -519,6 +525,22 @@ private fun ReadyMonitor(
         }
     }
 
+    if (showUpgradeAes) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { if (!ui.busy) showUpgradeAes = false },
+            sheetState = sheetState,
+        ) {
+            UpgradeAesSheetContent(
+                busy = ui.busy,
+                statusLine = ui.statusLine,
+                errorMessage = ui.errorMessage,
+                onDismiss = { if (!ui.busy) showUpgradeAes = false },
+                onUpgrade = { hex -> viewModel.changeKeyDesToAesLab(hex) },
+            )
+        }
+    }
+
     if (showCreateFile) {
         val existing = ui.explore?.files?.map { it.fileNo }?.toSet().orEmpty()
         val nextNo = (0..31).firstOrNull { it !in existing } ?: 0
@@ -587,12 +609,14 @@ private fun ReadyMonitor(
         )
     }
 
-    // Fermer sheets create après succès
+    // Fermer sheets create / upgrade après succès
     LaunchedEffect(ui.busy, ui.statusLine, ui.errorMessage) {
         if (!ui.busy && ui.errorMessage == null) {
             when {
                 ui.statusLine?.startsWith("CreateApplication OK") == true -> showCreateApp = false
                 ui.statusLine?.startsWith("CreateStdDataFile OK") == true -> showCreateFile = false
+                ui.statusLine?.startsWith("Master PICC basculée en AES") == true ->
+                    showUpgradeAes = false
             }
         }
     }
@@ -1194,6 +1218,76 @@ private fun WriteFileSheetContent(
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
         ) {
+            Text(stringResource(R.string.card_auth_cancel))
+        }
+    }
+}
+
+@Composable
+private fun UpgradeAesSheetContent(
+    busy: Boolean,
+    statusLine: String?,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onUpgrade: (newAesKeyHex: String) -> Unit,
+) {
+    var keyHex by rememberSaveable {
+        mutableStateOf(Hex.encode(AesConstants.FACTORY_KEY))
+    }
+    val canSubmit = !busy && keyHex.length == 32
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 28.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.card_upgrade_aes_sheet_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(R.string.card_upgrade_aes_sheet_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = keyHex,
+            onValueChange = {
+                keyHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(32)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.card_upgrade_aes_new_key)) },
+            supportingText = {
+                Text("${keyHex.length} / 32")
+            },
+            singleLine = true,
+            enabled = !busy,
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        )
+        TextButton(
+            onClick = { keyHex = Hex.encode(AesConstants.FACTORY_KEY) },
+            enabled = !busy,
+        ) {
+            Text(stringResource(R.string.card_key_factory))
+        }
+        if (statusLine != null && busy) {
+            BusyLabel(busy = true, text = statusLine)
+        }
+        if (errorMessage != null) {
+            Text(errorMessage, color = MaterialTheme.colorScheme.error)
+        }
+        Button(
+            onClick = { onUpgrade(keyHex) },
+            enabled = canSubmit,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            BusyLabel(busy = busy, text = stringResource(R.string.card_upgrade_aes_action))
+        }
+        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.card_auth_cancel))
         }
     }

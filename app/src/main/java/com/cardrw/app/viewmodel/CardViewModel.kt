@@ -1236,6 +1236,94 @@ class CardViewModel @Inject constructor(
         }
     }
 
+    /**
+     * ChangeKey DES→AES sur master PICC (carte vierge).
+     * Après succès : session DES invalidée, re-auth AES auto avec [newAesKeyHex].
+     */
+    fun changeKeyDesToAesLab(newAesKeyHex: String, keyNo: Int = 0) {
+        viewModelScope.launch {
+            val clean = newAesKeyHex.replace(Regex("[^0-9a-fA-F]"), "")
+            val newKey = try {
+                require(clean.length == 32) { "clé AES = 32 hex, got ${clean.length}" }
+                Hex.decode(clean)
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(errorMessage = "Nouvelle clé AES invalide : ${e.message}")
+                }
+                return@launch
+            }
+            _ui.update {
+                it.copy(
+                    busy = true,
+                    errorMessage = null,
+                    statusLine = "ChangeKey DES→AES (clé $keyNo)…",
+                )
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.changeKeyDesToAes(keyNo, newKey, keyVersion = 0)
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    // Session DES morte ; mémoriser la nouvelle clé AES pour re-auth
+                    val aid = "000000"
+                    rememberAuth(aid, keyNo, newKey, vaultEntryId = null)
+                    factoryFailedSlotsByAid.remove(aid.uppercase())
+                    _ui.update {
+                        it.copy(
+                            authSession = null,
+                            statusLine = "ChangeKey DES→AES OK — re-auth AES…",
+                            errorMessage = null,
+                            keyHex = clean.uppercase(),
+                            keyNo = keyNo,
+                        )
+                    }
+                    syncJournal()
+                    // Re-auth AES immédiat (même slot) pour débloquer Create/Write
+                    val reauth = withContext(Dispatchers.IO) {
+                        withLiveClient { client ->
+                            client.selectApplication(Aid.PICC)
+                            client.authenticateAesPreferEv1(
+                                keyNo = keyNo,
+                                key = newKey,
+                                aidHex = aid,
+                            )
+                        }
+                    }
+                    reauth.fold(
+                        onSuccess = { sess ->
+                            _ui.update {
+                                it.copy(
+                                    busy = false,
+                                    authSession = sess.toAuthSession(),
+                                    selectedAidHex = aid,
+                                    statusLine = "Master PICC basculée en AES — session AES OK",
+                                    authSuccessFlash = true,
+                                    authSuccessMessage = "PICC master AES (après DES→AES)",
+                                    errorMessage = null,
+                                )
+                            }
+                            syncJournal()
+                            runExplore(aid, fillRemembered = true)
+                        },
+                        onFailure = { e ->
+                            _ui.update {
+                                it.copy(
+                                    busy = false,
+                                    statusLine = "ChangeKey DES→AES OK — re-auth AES à faire",
+                                    errorMessage = "Bascule OK mais auth AES a échoué : ${e.message}",
+                                )
+                            }
+                            syncJournal()
+                        },
+                    )
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
     /** DeleteApplication (PICC master AES). */
     fun deleteApplicationLab(aidHex: String) {
         viewModelScope.launch {
