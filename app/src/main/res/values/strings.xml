@@ -47,6 +47,12 @@
     <string name="card_get_card_uid_auto_hint">UID réel : lecture auto après auth (Random ID). Secours ci-dessous si besoin.</string>
     <string name="card_tree_apps_header">Applications (%1$d)</string>
     <string name="card_tree_files_header">Fichiers (%1$d)</string>
+    <!-- Volume app sélectionnée : somme des tailles fichier connues (GetFileSettings) -->
+    <string name="card_tree_app_volume">Volume · %1$s</string>
+    <string name="card_tree_app_volume_partial">Volume · %1$s · %2$d/%3$d tailles connues</string>
+    <string name="card_tree_app_volume_empty">Volume · — (aucun fichier)</string>
+    <string name="card_tree_bytes_unit">%1$d o</string>
+    <string name="card_tree_kib_unit">%1$.1f Ko</string>
     <string name="card_tree_picc_meta">Key settings PICC</string>
     <string name="card_tree_app_meta">Key settings application</string>
     <string name="card_tree_picc_pending">Key settings PICC non encore lus — select ou Actualiser.</string>

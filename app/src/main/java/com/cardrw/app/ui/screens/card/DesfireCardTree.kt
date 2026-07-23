@@ -314,6 +314,8 @@ private fun AppTreeNode(
                             domainLabel = stringResource(R.string.card_tree_app_meta),
                         )
                     }
+                    // Volume discret = somme des tailles fichier (GetFileSettings), pas de cmd dédiée
+                    AppVolumeHint(files = explore.files)
                     if (explore.files.isEmpty()) {
                         Text(
                             text = stringResource(R.string.card_no_files),
@@ -572,6 +574,47 @@ private fun FileTreeNode(
                 }
             }
         }
+    }
+}
+
+/**
+ * Volume discret de l’app **sélectionnée** : somme des [FileSettings.sizeBytes]
+ * déjà obtenus via explore (Standard/Backup). Pas de commande DESFire « taille app ».
+ */
+@Composable
+private fun AppVolumeHint(files: List<FileNode>) {
+    val sizes = files.mapNotNull { it.settings.sizeBytes }
+    val known = sizes.size
+    val total = sizes.sum()
+    val label = when {
+        files.isEmpty() -> stringResource(R.string.card_tree_app_volume_empty)
+        known == 0 -> stringResource(
+            R.string.card_tree_app_volume_partial,
+            "—",
+            0,
+            files.size,
+        )
+        known < files.size -> stringResource(
+            R.string.card_tree_app_volume_partial,
+            formatByteVolume(total),
+            known,
+            files.size,
+        )
+        else -> stringResource(R.string.card_tree_app_volume, formatByteVolume(total))
+    }
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun formatByteVolume(bytes: Int): String {
+    return if (bytes < 1024) {
+        stringResource(R.string.card_tree_bytes_unit, bytes)
+    } else {
+        stringResource(R.string.card_tree_kib_unit, bytes / 1024.0)
     }
 }
 
