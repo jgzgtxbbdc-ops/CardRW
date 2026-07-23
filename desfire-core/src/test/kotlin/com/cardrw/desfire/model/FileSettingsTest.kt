@@ -3,13 +3,14 @@ package com.cardrw.desfire.model
 import com.cardrw.desfire.util.Hex
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class FileSettingsTest {
 
     @Test
     fun parse_standard_plain_free() {
-        // type=00, comm=00, rights=EEEE (free), size=32 (0x20 LE)
+        // type=00, comm=00, rights=EEEE (LE=BE), size=32 (0x20 LE)
         val raw = Hex.decode("0000EEEE200000")
         val fs = FileSettings.parse(0, raw)
         assertEquals(FileType.STANDARD, fs.fileType)
@@ -32,6 +33,36 @@ class FileSettingsTest {
     }
 
     @Test
+    fun access_rights_wire_little_endian_lab_card() {
+        // Wire terrain GetFileSettings : 20 12 (comme journal B013F5 / B313F5)
+        // freefare le16toh → logique 0x1220 → R=1 W=2 RW=2 Ch=0
+        val ar = AccessRights.parse(Hex.decode("2012"), 0)
+        assertEquals(0x1220, ar.raw)
+        assertEquals(1, ar.read)
+        assertEquals(2, ar.write)
+        assertEquals(2, ar.readWrite)
+        assertEquals(0, ar.change)
+        assertTrue(ar.canReadWith(1)) // R
+        assertTrue(ar.canReadWith(2)) // RW
+        assertFalse(ar.canReadWith(0))
+        assertTrue(ar.canWriteWith(2)) // W et RW
+        assertFalse(ar.canWriteWith(0))
+        assertFalse(ar.canWriteWith(1))
+    }
+
+    @Test
+    fun access_rights_logical_2012_roundtrip_wire() {
+        // Logique R=2 W=0 RW=1 Ch=2 → wire LE 12 20
+        val wire = AccessRights.toWireLe(0x2012)
+        assertEquals("1220", Hex.encode(wire))
+        val ar = AccessRights.parse(wire, 0)
+        assertEquals(2, ar.read)
+        assertEquals(0, ar.write)
+        assertEquals(1, ar.readWrite)
+        assertEquals(2, ar.change)
+    }
+
+    @Test
     fun access_rights_never() {
         val ar = AccessRights.parse(0xF0F0)
         assertEquals(0x0F, ar.read)
@@ -42,22 +73,7 @@ class FileSettingsTest {
     }
 
     @Test
-    fun can_read_with_key_rights() {
-        // R=2 W=0 RW=1 Ch=2  (0x2012) — cas labo B013F5 fichier 0
-        val ar = AccessRights.parse(0x2012)
-        assertEquals(2, ar.read)
-        assertEquals(0, ar.write)
-        assertEquals(1, ar.readWrite)
-        assertEquals(false, ar.canReadWith(0)) // master ≠ passe-droit lecture
-        assertEquals(true, ar.canReadWith(1)) // RW
-        assertEquals(true, ar.canReadWith(2)) // R
-        assertEquals(false, ar.canReadWith(null))
-        assertEquals(true, AccessRights.parse(0xEEEE).canReadWith(null)) // Free
-    }
-
-    @Test
     fun free_write_uses_plain_even_if_file_full() {
-        // Create lab Free 0xEEEE + FULL wire → write effectif PLAIN (sinon 0x7E)
         val rights = AccessRights.parse(0xEEEE)
         val fs = FileSettings(
             fileNo = 15,
@@ -69,9 +85,7 @@ class FileSettingsTest {
         )
         assertEquals(CommMode.PLAIN, fs.effectiveCommModeForWrite(sessionKeyNo = 0))
         assertEquals(CommMode.PLAIN, fs.effectiveCommModeForWrite(sessionKeyNo = null))
-        // Clé W dédiée → FULL
-        val protected = AccessRights.parse(0x2000) // R=2 W=0 ...
-        // 0x2000: R=2, W=0, RW=0, Ch=0
+        // Logique R=2 W=0 → wire would be 00 20 for 0x2000
         val fs2 = fs.copy(accessRights = AccessRights.parse(0x2000))
         assertEquals(CommMode.FULL, fs2.effectiveCommModeForWrite(sessionKeyNo = 0))
         assertEquals(CommMode.PLAIN, fs2.effectiveCommModeForWrite(sessionKeyNo = 1))
@@ -81,7 +95,7 @@ class FileSettingsTest {
     fun key_settings_parse() {
         val info = KeySettingsInfo.parse(Hex.decode("0F81"))
         assertEquals(0x0F, info.settingsRaw)
-        assertEquals(1, info.maxKeys) // nibble bas — selon carte peut être nb clés
+        assertEquals(1, info.maxKeys)
         assertTrue(info.bits.allowMasterKeyChange)
         assertTrue(info.bits.configurationChangeable)
     }

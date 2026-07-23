@@ -99,9 +99,12 @@ data class AccessRights(
     }
 
     companion object {
-        /** Deux octets big-endian : RRRRWWWW RRRRCCCC (NXP / freefare MDAR_*). */
-        fun parse(rawBe: Int): AccessRights {
-            val ar = rawBe and 0xFFFF
+        /**
+         * Valeur logique 16 bits (packing MDAR freefare / NXP) :
+         * bits 15–12 Read, 11–8 Write, 7–4 ReadWrite, 3–0 Change.
+         */
+        fun parse(rawLogical: Int): AccessRights {
+            val ar = rawLogical and 0xFFFF
             return AccessRights(
                 read = (ar ushr 12) and 0x0F,
                 write = (ar ushr 8) and 0x0F,
@@ -111,10 +114,27 @@ data class AccessRights(
             )
         }
 
+        /**
+         * Octets filaires GetFileSettings / CreateFile : **little-endian**
+         * (libfreefare `le16toh` sur le champ access_rights).
+         *
+         * Ex. wire `20 12` → logique `0x1220` → R=1 W=2 RW=2 Ch=0
+         * (et non BE `0x2012` qui inversait W/R aux yeux du moniteur).
+         */
         fun parse(bytes: ByteArray, offset: Int = 0): AccessRights {
             require(bytes.size >= offset + 2)
-            val raw = ((bytes[offset].toInt() and 0xFF) shl 8) or (bytes[offset + 1].toInt() and 0xFF)
+            val raw = (bytes[offset].toInt() and 0xFF) or
+                ((bytes[offset + 1].toInt() and 0xFF) shl 8)
             return parse(raw)
+        }
+
+        /** Encode logique → 2 o LE pour CreateStdDataFile / ChangeFileSettings. */
+        fun toWireLe(rawLogical: Int): ByteArray {
+            val ar = rawLogical and 0xFFFF
+            return byteArrayOf(
+                (ar and 0xFF).toByte(),
+                ((ar ushr 8) and 0xFF).toByte(),
+            )
         }
     }
 }

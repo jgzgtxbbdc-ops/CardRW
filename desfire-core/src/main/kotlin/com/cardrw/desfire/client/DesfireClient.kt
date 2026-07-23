@@ -11,6 +11,7 @@ import com.cardrw.desfire.framing.NativeFraming
 import com.cardrw.desfire.log.ApduDirection
 import com.cardrw.desfire.log.ApduJournal
 import com.cardrw.desfire.log.ApduLogEntry
+import com.cardrw.desfire.model.AccessRights
 import com.cardrw.desfire.model.Aid
 import com.cardrw.desfire.model.ApplicationExploreResult
 import com.cardrw.desfire.model.CardIdentity
@@ -804,7 +805,7 @@ class DesfireClient(
      * CreateStdDataFile (0xCD).
      *
      * @param commSettings 0x00 plain, 0x01 MAC, 0x03 FULL
-     * @param accessRights raw big-endian 16-bit (NXP MDAR packing)
+     * @param accessRights valeur logique MDAR 16 bits (ex. 0xEEEE Free) — **LE** sur le fil
      */
     fun createStdDataFile(
         fileNo: Int,
@@ -818,8 +819,9 @@ class DesfireClient(
         val data = ByteArray(7)
         data[0] = fileNo.toByte()
         data[1] = (commSettings and 0xFF).toByte()
-        data[2] = ((accessRights ushr 8) and 0xFF).toByte()
-        data[3] = (accessRights and 0xFF).toByte()
+        val arWire = AccessRights.toWireLe(accessRights)
+        data[2] = arWire[0]
+        data[3] = arWire[1]
         writeLe24(data, 4, fileSize)
         exchangeAuthenticatedPlain(DesfireCommand.CREATE_STD_DATA_FILE, data)
     }
