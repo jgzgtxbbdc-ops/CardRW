@@ -17,6 +17,7 @@ import com.cardrw.desfire.client.DesfireClient
 import com.cardrw.desfire.client.DesfireProtocolException
 import com.cardrw.desfire.client.DesfireTransportException
 import com.cardrw.desfire.crypto.AesConstants
+import com.cardrw.desfire.crypto.DesConstants
 import com.cardrw.desfire.crypto.SecureMessagingLevel
 import com.cardrw.desfire.dump.CardDumpBuilder
 import com.cardrw.desfire.dump.DumpRestorePlanner
@@ -32,6 +33,7 @@ import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
 import com.cardrw.desfire.model.readKeyCandidates
 import com.cardrw.desfire.session.AuthSession
+import com.cardrw.desfire.session.DesLegacySession
 import com.cardrw.desfire.util.Hex
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -697,13 +699,13 @@ class CardViewModel @Inject constructor(
 
     /**
      * Garantit une session **AES** master PICC (clé 0) pour Create / Format / Delete / restore.
-     * Rejoue mémorisée ou usine sans saisie.
      *
-     * Ne **jamais** accepter DES legacy : Create/Write exigent AES. Si master encore DES
-     * (carte vierge NXP), message → bascule DES→AES moniteur.
+     * 1) Session live AES déjà OK  
+     * 2) Auth AES mémorisée / usine  
+     * 3) Si master encore **DES usine** (carte vierge NXP) → **bascule auto DES→AES**
+     *    (ChangeKey 0xC4, nouvelle clé AES 00…00) puis re-auth AES
      *
-     * Important : vérifier le [DesfireClient.session] live — un SelectApplication
-     * invalide l’auth même si l’UI affiche encore « Auth AES ».
+     * Important : vérifier le [DesfireClient.session] live — SelectApplication invalide l’auth.
      */
     private suspend fun ensurePiccMasterAesSession(): Boolean {
         if (liveClientHasPiccMasterAes()) {
@@ -721,22 +723,22 @@ class CardViewModel @Inject constructor(
             }
             return true
         }
-        val sess = _ui.value.authSession
-        // Session DES déjà ouverte côté UI : message clair (ne pas boucler Create)
-        if (sess?.authenticated == true &&
-            sess.aidHex.equals("000000", ignoreCase = true) &&
-            sess.smLevel == SecureMessagingLevel.DES_LEGACY
-        ) {
-            _ui.update {
-                it.copy(
-                    busy = false,
-                    errorMessage = "PICC master encore en DES usine — " +
-                        "bascule en AES (bouton « Basculer master PICC en AES ») avant Create / restore.",
-                    statusLine = "Session DES · structure AES bloquée",
-                )
-            }
-            return false
+
+        // Déjà en DES live/UI → bascule auto tout de suite
+        val uiDes = _ui.value.authSession?.let {
+            it.authenticated &&
+                it.aidHex.equals("000000", ignoreCase = true) &&
+                it.smLevel == SecureMessagingLevel.DES_LEGACY
+        } == true
+        val liveDes = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.session is DesLegacySession && client.session?.keyNumber == 0
+            }.getOrDefault(false)
         }
+        if (uiDes || liveDes) {
+            return upgradeDesPiccMasterToAesFactory()
+        }
+
         _ui.update {
             it.copy(
                 busy = true,
@@ -745,7 +747,7 @@ class CardViewModel @Inject constructor(
                 selectedAidHex = "000000",
             )
         }
-        // Mémorisée PICC clé 0 (AES uniquement — silentAuth refuse DES pour structure)
+        // Mémorisée PICC clé 0 (AES only)
         val remembered = rememberedKeysByAid["000000"]?.get(0)
         if (remembered != null) {
             val ok = silentAuthThenExplore(
@@ -755,17 +757,9 @@ class CardViewModel @Inject constructor(
                 fillRemembered = false,
                 allowDesFactoryFallback = false,
             )
-            if (ok) {
-                val after = _ui.value.authSession
-                if (after?.smLevel != null &&
-                    after.smLevel != SecureMessagingLevel.DES_LEGACY &&
-                    after.smLevel != SecureMessagingLevel.NONE
-                ) {
-                    return true
-                }
-            }
+            if (ok && liveClientHasPiccMasterAes()) return true
         }
-        // Usine AES only — pas de fallback DES (sinon restore/create croient être OK)
+        // Usine AES (sans fallback DES — on gère la bascule explicitement)
         val keyBytes = AesConstants.FACTORY_KEY.copyOf()
         val result = withContext(Dispatchers.IO) {
             withLiveClient { client ->
@@ -773,6 +767,87 @@ class CardViewModel @Inject constructor(
                 client.authenticateAesPreferEv1(
                     keyNo = 0,
                     key = keyBytes,
+                    aidHex = "000000",
+                    allowDesFactoryFallback = false,
+                )
+                client.authSession
+            }
+        }
+        return result.fold(
+            onSuccess = { session ->
+                if (session != null &&
+                    session.smLevel != SecureMessagingLevel.DES_LEGACY &&
+                    session.smLevel != SecureMessagingLevel.NONE
+                ) {
+                    rememberAuth("000000", 0, keyBytes, vaultEntryId = null)
+                    _ui.update {
+                        it.copy(
+                            authSession = session,
+                            selectedAidHex = "000000",
+                            errorMessage = null,
+                            statusLine = null,
+                        )
+                    }
+                    syncJournal()
+                    showAuthSuccessFlash(authFlashMessage("000000", 0, "usine"))
+                    true
+                } else {
+                    // AES a répondu mais session DES ? bascule
+                    upgradeDesPiccMasterToAesFactory()
+                }
+            },
+            onFailure = { e ->
+                syncJournal()
+                // AE / auth fail sur blank → tenter DES→AES auto
+                val tryDesUpgrade = e is DesfireProtocolException ||
+                    e.message?.contains("auth", ignoreCase = true) == true
+                if (tryDesUpgrade && upgradeDesPiccMasterToAesFactory()) {
+                    true
+                } else {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            authSession = null,
+                            errorMessage = "Auth PICC master AES requise : ${e.message}. " +
+                                "Bascule DES→AES auto a aussi échoué (master non usine ?).",
+                        )
+                    }
+                    false
+                }
+            },
+        )
+    }
+
+    /**
+     * Carte vierge NXP : master PICC encore DES 00…00 → ChangeKey DES→AES usine 00…00
+     * + re-auth AES. Labo only (ne touche pas une master DES personnalisée inconnue).
+     */
+    private suspend fun upgradeDesPiccMasterToAesFactory(): Boolean {
+        val newAes = AesConstants.FACTORY_KEY.copyOf()
+        _ui.update {
+            it.copy(
+                busy = true,
+                errorMessage = null,
+                statusLine = "PICC DES usine — bascule auto DES→AES…",
+                selectedAidHex = "000000",
+            )
+        }
+        val result = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.ensureApplicationSelected(Aid.PICC)
+                // Auth DES si pas déjà en session DES slot 0
+                if (client.session !is DesLegacySession || client.session?.keyNumber != 0) {
+                    client.authenticateDes(
+                        keyNo = 0,
+                        key = DesConstants.FACTORY_2KTDEA_KEY,
+                        aidHex = "000000",
+                    )
+                }
+                client.changeKeyDesToAes(keyNo = 0, newAesKey = newAes, keyVersion = 0)
+                // Session DES morte → AES
+                client.authenticateAesPreferEv1(
+                    keyNo = 0,
+                    key = newAes,
                     aidHex = "000000",
                     allowDesFactoryFallback = false,
                 )
@@ -790,41 +865,39 @@ class CardViewModel @Inject constructor(
                         it.copy(
                             busy = false,
                             authSession = session,
-                            errorMessage = "PICC master encore en DES usine — " +
-                                "bascule en AES avant Create / Format / restore.",
-                            statusLine = "AES usine refusée · DES possible via moniteur",
+                            errorMessage = "Bascule DES→AES OK mais session AES absente — réessaie.",
+                            statusLine = null,
                         )
                     }
-                    return@fold false
+                    false
+                } else {
+                    rememberAuth("000000", 0, newAes, vaultEntryId = null)
+                    factoryFailedSlotsByAid.remove("000000")
+                    _ui.update {
+                        it.copy(
+                            authSession = session,
+                            selectedAidHex = "000000",
+                            keyHex = Hex.encode(newAes),
+                            keyNo = 0,
+                            errorMessage = null,
+                            statusLine = "Master PICC basculée DES→AES (usine) — session AES OK",
+                            authSuccessFlash = true,
+                            authSuccessMessage = "DES→AES auto (usine 00…00)",
+                        )
+                    }
+                    syncJournal()
+                    true
                 }
-                rememberAuth("000000", 0, keyBytes, vaultEntryId = null)
-                _ui.update {
-                    it.copy(
-                        authSession = session,
-                        selectedAidHex = "000000",
-                        errorMessage = null,
-                        statusLine = null,
-                    )
-                }
-                syncJournal()
-                showAuthSuccessFlash(authFlashMessage("000000", 0, "usine"))
-                true
             },
             onFailure = { e ->
                 syncJournal()
-                val desHint = if (
-                    e is DesfireProtocolException &&
-                    e.message?.contains("Authentication", ignoreCase = true) == true
-                ) {
-                    " Si carte vierge NXP (master DES), utilise « Basculer master PICC en AES »."
-                } else {
-                    ""
-                }
                 _ui.update {
                     it.copy(
                         busy = false,
                         authSession = null,
-                        errorMessage = "Auth PICC master AES requise : ${e.message}.$desHint",
+                        errorMessage = "Bascule DES→AES auto échouée : ${e.message}. " +
+                            "Master non usine ? Utilise le sheet « Basculer master PICC en AES » avec la bonne clé.",
+                        statusLine = null,
                     )
                 }
                 false
