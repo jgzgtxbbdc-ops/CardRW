@@ -679,23 +679,50 @@ class CardViewModel @Inject constructor(
     }
 
     /**
+     * True si le **client live** a une session AES master PICC (clé 0).
+     * Ne se fie pas seul à l’UI : SelectApplication tue la SM côté carte.
+     */
+    private suspend fun liveClientHasPiccMasterAes(): Boolean {
+        return withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                val s = client.session ?: return@withLiveClient false
+                s.keyNumber == 0 &&
+                    s.smLevel != SecureMessagingLevel.DES_LEGACY &&
+                    s.smLevel != SecureMessagingLevel.NONE &&
+                    (client.selectedAid?.isPicc == true ||
+                        s.aidHex.equals("000000", ignoreCase = true))
+            }.getOrDefault(false)
+        }
+    }
+
+    /**
      * Garantit une session **AES** master PICC (clé 0) pour Create / Format / Delete / restore.
      * Rejoue mémorisée ou usine sans saisie.
      *
      * Ne **jamais** accepter DES legacy : Create/Write exigent AES. Si master encore DES
      * (carte vierge NXP), message → bascule DES→AES moniteur.
+     *
+     * Important : vérifier le [DesfireClient.session] live — un SelectApplication
+     * invalide l’auth même si l’UI affiche encore « Auth AES ».
      */
     private suspend fun ensurePiccMasterAesSession(): Boolean {
-        val sess = _ui.value.authSession
-        if (sess?.authenticated == true &&
-            sess.aidHex.equals("000000", ignoreCase = true) &&
-            sess.keyNumber == 0 &&
-            sess.smLevel != SecureMessagingLevel.DES_LEGACY &&
-            sess.smLevel != SecureMessagingLevel.NONE
-        ) {
+        if (liveClientHasPiccMasterAes()) {
+            val live = withContext(Dispatchers.IO) {
+                withLiveClient { it.authSession }.getOrNull()
+            }
+            if (live != null) {
+                _ui.update {
+                    it.copy(
+                        authSession = live,
+                        selectedAidHex = "000000",
+                        errorMessage = null,
+                    )
+                }
+            }
             return true
         }
-        // Session DES déjà ouverte : ne pas prétendre « structure OK »
+        val sess = _ui.value.authSession
+        // Session DES déjà ouverte côté UI : message clair (ne pas boucler Create)
         if (sess?.authenticated == true &&
             sess.aidHex.equals("000000", ignoreCase = true) &&
             sess.smLevel == SecureMessagingLevel.DES_LEGACY
@@ -1785,7 +1812,12 @@ class CardViewModel @Inject constructor(
 
     /**
      * Exécute le plan de restore sur la carte live (labo AES usine).
-     * Continue après erreur d’étape (note dans status) sauf FormatPICC KO fatal.
+     *
+     * **SelectApplication tue la session auth** : ne jamais `select` avant Create/Write
+     * sans re-auth ; utiliser [ensureApplicationSelected] + [ensurePiccMasterAesSession] /
+     * [ensureAppMasterAesSession] qui re-auth si le client live n’a plus de SM.
+     *
+     * Erreur auth AES / DES → arrêt immédiat (pas 16× le même message).
      */
     fun executeRestoreDump(
         fileName: String,
@@ -1805,13 +1837,24 @@ class CardViewModel @Inject constructor(
                 var done = 0
 
                 if (!ensurePiccMasterAesSession()) {
+                    // errorMessage déjà posé par ensure (DES / AE / …)
+                    val msg = _ui.value.errorMessage
+                        ?: "Restore : auth master PICC AES requise (usine 00…00 ou mémorisée). " +
+                        "Si carte vierge DES → « Basculer master PICC en AES »."
                     _ui.update {
-                        it.copy(
-                            busy = false,
-                            errorMessage = "Restore : auth master PICC AES requise (usine 00…00 ou mémorisée).",
-                        )
+                        it.copy(busy = false, errorMessage = msg)
                     }
                     return@launch
+                }
+
+                fun isFatalAuthError(msg: String?): Boolean {
+                    if (msg == null) return false
+                    val m = msg.lowercase()
+                    return m.contains("session aes") ||
+                        m.contains("authentifie") ||
+                        m.contains("des usine") ||
+                        m.contains("authentication") ||
+                        m.contains("0xae")
                 }
 
                 for (step in plan.steps) {
@@ -1819,9 +1862,31 @@ class CardViewModel @Inject constructor(
                         is DumpRestorePlanner.Step.Skip -> continue
                         is DumpRestorePlanner.Step.FormatPicc -> {
                             _ui.update { it.copy(statusLine = step.label) }
+                            // Auth d’abord, puis format **sans** re-Select (Select tue la SM)
+                            if (!ensurePiccMasterAesSession()) {
+                                _ui.update {
+                                    it.copy(
+                                        busy = false,
+                                        errorMessage = _ui.value.errorMessage
+                                            ?: "FormatPICC : session AES PICC requise.",
+                                    )
+                                }
+                                return@launch
+                            }
                             val r = withContext(Dispatchers.IO) {
                                 withLiveClient { client ->
-                                    client.selectApplication(Aid.PICC)
+                                    client.ensureApplicationSelected(Aid.PICC)
+                                    if (client.session == null ||
+                                        client.session!!.smLevel == SecureMessagingLevel.DES_LEGACY
+                                    ) {
+                                        val key = AesConstants.FACTORY_KEY.copyOf()
+                                        client.authenticateAesPreferEv1(
+                                            keyNo = 0,
+                                            key = key,
+                                            aidHex = "000000",
+                                            allowDesFactoryFallback = false,
+                                        )
+                                    }
                                     client.formatPicc()
                                 }
                             }
@@ -1834,12 +1899,11 @@ class CardViewModel @Inject constructor(
                                 }
                                 return@launch
                             }
-                            // Re-auth PICC après format
                             if (!ensurePiccMasterAesSession()) {
                                 _ui.update {
                                     it.copy(
                                         busy = false,
-                                        errorMessage = "Format OK mais re-auth PICC a échoué.",
+                                        errorMessage = "Format OK mais re-auth PICC AES a échoué.",
                                     )
                                 }
                                 return@launch
@@ -1849,12 +1913,28 @@ class CardViewModel @Inject constructor(
                         is DumpRestorePlanner.Step.CreateApplication -> {
                             _ui.update { it.copy(statusLine = step.label) }
                             if (!ensurePiccMasterAesSession()) {
-                                errors += "CreateApp ${step.aidHex} : pas de session PICC"
-                                continue
+                                val msg = _ui.value.errorMessage
+                                    ?: "CreateApp ${step.aidHex} : pas de session PICC AES"
+                                _ui.update {
+                                    it.copy(busy = false, errorMessage = msg)
+                                }
+                                return@launch
                             }
                             val r = withContext(Dispatchers.IO) {
                                 withLiveClient { client ->
-                                    client.selectApplication(Aid.PICC)
+                                    // ensure (pas select forcé). Si Select a eu lieu → SM morte → re-auth.
+                                    client.ensureApplicationSelected(Aid.PICC)
+                                    if (client.session == null ||
+                                        client.session!!.smLevel == SecureMessagingLevel.DES_LEGACY
+                                    ) {
+                                        val key = AesConstants.FACTORY_KEY.copyOf()
+                                        client.authenticateAesPreferEv1(
+                                            keyNo = 0,
+                                            key = key,
+                                            aidHex = "000000",
+                                            allowDesFactoryFallback = false,
+                                        )
+                                    }
                                     client.createApplication(
                                         aid = Aid.fromHex(step.aidHex),
                                         keySettings = step.keySettings,
@@ -1864,7 +1944,18 @@ class CardViewModel @Inject constructor(
                                 }
                             }
                             if (r.isFailure) {
-                                errors += "CreateApp ${step.aidHex}: ${r.exceptionOrNull()?.message}"
+                                val em = r.exceptionOrNull()?.message
+                                if (isFatalAuthError(em)) {
+                                    _ui.update {
+                                        it.copy(
+                                            busy = false,
+                                            errorMessage = "Restore stoppé (auth) : $em",
+                                            statusLine = "Restore — $done étape(s) avant échec auth",
+                                        )
+                                    }
+                                    return@launch
+                                }
+                                errors += "CreateApp ${step.aidHex}: $em"
                             } else {
                                 done++
                             }
@@ -1873,6 +1964,8 @@ class CardViewModel @Inject constructor(
                             _ui.update { it.copy(statusLine = step.label) }
                             val ok = ensureAppMasterAesSession(step.aidHex)
                             if (!ok) {
+                                // Après CreateApp, auth app usine 00…00 ; si KO on note et on continue
+                                // (CreateFile retentera). Pas d’arrêt global.
                                 errors += "Select/auth ${step.aidHex} KO"
                             } else {
                                 done++
@@ -1886,7 +1979,12 @@ class CardViewModel @Inject constructor(
                             }
                             val r = withContext(Dispatchers.IO) {
                                 withLiveClient { client ->
-                                    client.ensureApplicationSelected(Aid.fromHex(step.aidHex))
+                                    // ensureApp a déjà Select+auth ; re-select tuerait la SM
+                                    if (client.selectedAid?.hex?.equals(step.aidHex, true) != true ||
+                                        client.session == null
+                                    ) {
+                                        error("Session app ${step.aidHex} absente avant CreateFile")
+                                    }
                                     client.createStdDataFile(
                                         fileNo = step.fileNo,
                                         fileSize = step.sizeBytes,
@@ -1896,7 +1994,17 @@ class CardViewModel @Inject constructor(
                                 }
                             }
                             if (r.isFailure) {
-                                errors += "CreateFile ${step.aidHex}/F${step.fileNo}: ${r.exceptionOrNull()?.message}"
+                                val em = r.exceptionOrNull()?.message
+                                if (isFatalAuthError(em)) {
+                                    _ui.update {
+                                        it.copy(
+                                            busy = false,
+                                            errorMessage = "Restore stoppé (auth) : $em",
+                                        )
+                                    }
+                                    return@launch
+                                }
+                                errors += "CreateFile ${step.aidHex}/F${step.fileNo}: $em"
                             } else {
                                 done++
                             }
@@ -1908,11 +2016,13 @@ class CardViewModel @Inject constructor(
                                 continue
                             }
                             val bytes = Hex.decode(step.dataHex)
-                            // Free→PLAIN ; sinon FULL (labo Free le plus courant)
                             val r = withContext(Dispatchers.IO) {
                                 withLiveClient { client ->
-                                    client.ensureApplicationSelected(Aid.fromHex(step.aidHex))
-                                    // Tente FULL puis PLAIN
+                                    if (client.selectedAid?.hex?.equals(step.aidHex, true) != true ||
+                                        client.session == null
+                                    ) {
+                                        error("Session app ${step.aidHex} absente avant Write")
+                                    }
                                     try {
                                         client.writeData(
                                             step.fileNo,
@@ -1942,8 +2052,11 @@ class CardViewModel @Inject constructor(
 
                 // Refresh identity + moniteur
                 refreshIdentityAfterStructureChange(restorePiccMaster = true)
-                val summary = "Restore OK — $done étape(s)" +
-                    if (errors.isEmpty()) "" else " · ${errors.size} erreur(s)"
+                val summary = if (errors.isEmpty()) {
+                    "Restore OK — $done étape(s)"
+                } else {
+                    "Restore terminé — $done OK · ${errors.size} erreur(s)"
+                }
                 _ui.update {
                     it.copy(
                         busy = false,
