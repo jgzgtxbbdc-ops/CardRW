@@ -89,6 +89,7 @@ fun DesfireCardTree(
     onWriteFile: (FileNode) -> Unit = {},
     onAddApplication: () -> Unit = {},
     onUpgradePiccToAes: () -> Unit = {},
+    onFormatPicc: () -> Unit = {},
     onDeleteApplication: (aidHex: String) -> Unit = {},
     onAddFile: () -> Unit = {},
     onDeleteFile: (FileNode) -> Unit = {},
@@ -163,6 +164,13 @@ fun DesfireCardTree(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(stringResource(R.string.card_tree_add_app))
+                        }
+                        OutlinedButton(
+                            onClick = onFormatPicc,
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.card_tree_format_picc))
                         }
                     }
                     RefreshRow(busy = busy, onRefresh = onRefresh)

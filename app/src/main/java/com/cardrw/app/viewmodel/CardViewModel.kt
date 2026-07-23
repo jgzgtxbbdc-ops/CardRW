@@ -1324,6 +1324,50 @@ class CardViewModel @Inject constructor(
         }
     }
 
+    /**
+     * FormatPICC (0xFC) — efface toutes les apps.
+     * Session master PICC AES (clé 0) requise. Master key PICC conservée.
+     */
+    fun formatPiccLab() {
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "FormatPICC…")
+            }
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.formatPicc()
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    // Apps disparues : wipe mémoire session (sauf on peut re-auth PICC)
+                    rememberedKeysByAid.keys
+                        .filter { !it.equals("000000", ignoreCase = true) }
+                        .toList()
+                        .forEach { aid ->
+                            rememberedKeysByAid.remove(aid)?.values?.forEach { it.keyBytes.fill(0) }
+                            lastKeyNoByAid.remove(aid)
+                            factoryFailedSlotsByAid.remove(aid)
+                        }
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            authSession = null,
+                            selectedAidHex = "000000",
+                            explore = null,
+                            exploreByAid = emptyMap(),
+                            statusLine = "FormatPICC OK — toutes les apps effacées (master PICC inchangée)",
+                            errorMessage = null,
+                        )
+                    }
+                    syncJournal()
+                    refreshIdentityAfterStructureChange()
+                },
+                onFailure = { e -> handleOpFailure(e) },
+            )
+        }
+    }
+
     /** DeleteApplication (PICC master AES). */
     fun deleteApplicationLab(aidHex: String) {
         viewModelScope.launch {

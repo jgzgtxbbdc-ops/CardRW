@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-23 (ChangeKey DES→AES)  
+**Dernière mise à jour :** 2026-07-23 (FormatPICC)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — ChangeKey DES→AES PICC + sheet moniteur  
+**Commit :** (voir `git log -1`) — FormatPICC labo  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -23,7 +23,7 @@
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
 | Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
-| **v1** Write / Create / ChangeKey / dumps | 🔄 Write/Create/Delete ✅ ; ChangeKey AES ✅ ; **ChangeKey DES→AES** ✅ ; FormatPICC / dumps ⬜ |
+| **v1** Write / Create / ChangeKey / dumps | 🔄 Write/Create/Delete ✅ ; ChangeKey AES+DES→AES ✅ ; **FormatPICC** ✅ ; dumps ⬜ |
 
 ### v0.6 UX — moniteur Carte
 
@@ -115,8 +115,8 @@ Conventions v1 (à utiliser dès Write/ChangeKey) :
 
 Tests : `FactoryKeyTest`, `Ev1SessionPrepareCommandTest`.
 
-**Promesse produit actuelle :** lecteur DESFire pédagogique + auth AES/DES + moniteur arbre + Write/Create/Delete + bascule DES→AES PICC.  
-**Pas encore :** FormatPICC, dumps, templates, série, open source.
+**Promesse produit actuelle :** lecteur DESFire pédagogique + auth AES/DES + moniteur arbre + Write/Create/Delete + bascule DES→AES + FormatPICC.  
+**Pas encore :** dumps, templates, série, open source.
 
 ---
 
@@ -168,14 +168,13 @@ NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
 Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 
-État récent : DES usine PICC + Write/Create/Delete arbre + ChangeKey DES→AES
-  (session DES → bascule master AES → re-auth AES auto).
+État récent : cycle vierge DES→AES + Create/Write/Delete + FormatPICC livrés
+  (Format = master PICC AES clé 0, apps effacées, master key conservée).
 
 Prochaine tâche (une seule par session) :
-  A) Terrain : valider ChangeKey DES→AES sur carte vierge sacrifiable
-  B) FormatPICC (0xFC) labo
-  C) Dumps / export structure
-  D) K3 biométrie coffre — non prioritaire
+  A) Terrain FormatPICC (carte sacrifiable AES)
+  B) Dumps / export structure
+  C) K3 biométrie coffre — non prioritaire
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -185,13 +184,12 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — Terrain DES→AES** : PICC DES usine → bascule AES 00…00 → Create app.  
-   - **B — FormatPICC** `0xFC` (session AES master).  
-   - **C — Dumps** export arbre / hex.  
-   - **D — K3** biométrie coffre (optionnel).  
+   - **A — Terrain FormatPICC** : PICC AES master → Formater → apps vides → re-auth.  
+   - **B — Dumps** export arbre / hex.  
+   - **C — K3** biométrie coffre (optionnel).  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : cycle carte vierge **auth DES → ChangeKey AES → Create/Write** livré en code ; **valider terrain**.
+Avis fil rouge : labo structure complet sauf dumps ; **valider FormatPICC terrain**.
 
 ---
 

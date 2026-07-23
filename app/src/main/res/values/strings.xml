@@ -69,6 +69,10 @@
     <string name="card_lab_file_no">N° fichier</string>
     <string name="card_lab_file_size">Taille (octets)</string>
     <string name="card_tree_add_app">Ajouter une application…</string>
+    <string name="card_tree_format_picc">Formater la carte (FormatPICC)…</string>
+    <string name="card_format_picc_title">Formater la carte ?</string>
+    <string name="card_format_picc_message">FormatPICC (0xFC) efface toutes les applications et fichiers. La master key PICC n’est pas modifiée. Irréversible — carte de labo uniquement.</string>
+    <string name="card_format_picc_confirm">Formater</string>
     <string name="card_tree_upgrade_aes">Basculer master PICC en AES…</string>
     <string name="card_tree_upgrade_aes_hint">Session DES usine : Create/Write impossibles tant que la master n’est pas AES.</string>
     <string name="card_upgrade_aes_sheet_title">Basculer master PICC en AES</string>

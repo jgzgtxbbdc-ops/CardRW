@@ -115,6 +115,7 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **v1 API labo** — WriteData (header=7 FULL), CreateApplication, CreateStdDataFile, ChangeKey AES (`e146933+`)
 - [x] Terrain Write/Create/Delete + sheets arbre (Free→PLAIN, pad optionnel)
 - [x] **ChangeKey DES→AES** PICC vierge (`prepareChangeKeyDesToAes` + sheet moniteur)
-- [ ] FormatPICC + dumps
+- [x] **FormatPICC** `0xFC` (master PICC AES, confirmation UI)
+- [ ] Dumps / export structure
 
 Voir aussi `docs/REPRISE.md`, `docs/UX_ECRAN_CARTE.md`, `docs/UX_COFFRE_CLES.md`.

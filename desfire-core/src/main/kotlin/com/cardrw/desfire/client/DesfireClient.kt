@@ -816,6 +816,27 @@ class DesfireClient(
         exchangeAuthenticatedPlain(DesfireCommand.CREATE_STD_DATA_FILE, data)
     }
 
+    /**
+     * FormatPICC (0xFC) — efface **toutes** les applications.
+     *
+     * Prérequis : session AES (EV1/EV2) authentifiée avec la **master PICC** (clé 0),
+     * application PICC sélectionnée. La master key PICC n’est **pas** réinitialisée.
+     *
+     * Après succès la session auth est invalidée (comportement carte / freefare).
+     */
+    fun formatPicc() {
+        val sess = requireAesSessionForWrite()
+        if ((sess.keyNumber and 0x0F) != 0) {
+            throw DesfireProtocolException(
+                "FormatPICC : authentifie avec la master PICC (clé 0), " +
+                    "session actuelle clé ${sess.keyNumber}.",
+            )
+        }
+        // SM plain + CMAC (comme CreateApplication / freefare FormatPICC)
+        exchangeAuthenticatedPlain(DesfireCommand.FORMAT_PICC, ByteArray(0))
+        session = null
+    }
+
     /** DeleteApplication (0xDA) — session PICC master AES. */
     fun deleteApplication(aid: Aid) {
         requireAesSessionForWrite()
@@ -1299,6 +1320,7 @@ class DesfireClient(
             DesfireCommand.CHANGE_KEY ->
                 if (data.isNotEmpty()) "ChangeKey (clé n°${data[0].toInt() and 0xFF})"
                 else "ChangeKey"
+            DesfireCommand.FORMAT_PICC -> "FormatPICC (efface toutes les apps)"
             DesfireCommand.GET_FILE_SETTINGS ->
                 if (data.isNotEmpty()) "GetFileSettings (fichier ${data[0].toInt() and 0xFF})"
                 else "GetFileSettings"

@@ -200,6 +200,7 @@ private fun ReadyMonitor(
     var showUpgradeAes by remember { mutableStateOf(false) }
     var deleteAppAid by remember { mutableStateOf<String?>(null) }
     var deleteFileNo by remember { mutableStateOf<Int?>(null) }
+    var showFormatPicc by remember { mutableStateOf(false) }
     // U5 : conserver / restaurer la position de scroll après auth / explore
     val monitorScroll = rememberScrollState()
     var savedScrollPx by rememberSaveable { mutableIntStateOf(0) }
@@ -393,6 +394,7 @@ private fun ReadyMonitor(
                 onWriteFile = { node -> writeFileNo = node.fileNo },
                 onAddApplication = { showCreateApp = true },
                 onUpgradePiccToAes = { showUpgradeAes = true },
+                onFormatPicc = { showFormatPicc = true },
                 onDeleteApplication = { aid -> deleteAppAid = aid },
                 onAddFile = { showCreateFile = true },
                 onDeleteFile = { node -> deleteFileNo = node.fileNo },
@@ -557,6 +559,33 @@ private fun ReadyMonitor(
                 onCreate = { no, size -> viewModel.createStdFileLab(no, size) },
             )
         }
+    }
+
+    if (showFormatPicc) {
+        AlertDialog(
+            onDismissRequest = { if (!ui.busy) showFormatPicc = false },
+            title = { Text(stringResource(R.string.card_format_picc_title)) },
+            text = { Text(stringResource(R.string.card_format_picc_message)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.formatPiccLab()
+                        showFormatPicc = false
+                    },
+                    enabled = !ui.busy,
+                ) {
+                    Text(stringResource(R.string.card_format_picc_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showFormatPicc = false },
+                    enabled = !ui.busy,
+                ) {
+                    Text(stringResource(R.string.card_auth_cancel))
+                }
+            },
+        )
     }
 
     deleteAppAid?.let { aid ->
