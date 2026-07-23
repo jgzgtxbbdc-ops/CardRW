@@ -118,7 +118,7 @@ Exemples plain : F0 `00 00 00 04 B2…` · F1 `00 00 00 12 02…`
 - [x] **FormatPICC** `0xFC` (master PICC AES, confirmation UI)
 - [x] **Auto-auth moniteur** — select = auth mémorisée/usine + flash ; Create/Format re-auth PICC ; AID suivant
 - [x] **Auth auto par intention / nœud** — Read/Write CTA → candidats R|W|RW mémorisés/usine + flash rôle
-- [ ] Dumps / export structure
+- [x] **Dumps moniteur** — JSON v2 structure+data sans secrets, liste écran Dumps, SHA-256
 
 **Philo moniteur :** ne pas redemander une op déjà OK en session (clés, structure PICC, suggestions AID/FileNo).
 

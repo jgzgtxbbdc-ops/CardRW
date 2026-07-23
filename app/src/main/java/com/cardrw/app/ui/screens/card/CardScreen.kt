@@ -67,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -269,6 +270,14 @@ private fun ReadyMonitor(
         viewModel.consumePendingWriteFile()
     }
 
+    // Dump exporté → presse-papiers (JSON sans secrets)
+    val clipboard = LocalClipboardManager.current
+    LaunchedEffect(ui.lastDumpJson, ui.lastDumpFileName) {
+        val json = ui.lastDumpJson ?: return@LaunchedEffect
+        clipboard.setText(AnnotatedString(json))
+        // laissé en mémoire pour un 2e copier éventuel ; clear au prochain export
+    }
+
     // Ferme la sheet après auth OK (explore auto U1 peut encore tourner : on ferme dès session OK + !busy auth phase)
     LaunchedEffect(ui.busy, ui.authSession?.authenticated, ui.errorMessage, closeSheetWhenAuthSettles) {
         if (!closeSheetWhenAuthSettles) return@LaunchedEffect
@@ -416,6 +425,13 @@ private fun ReadyMonitor(
             }
 
             Spacer(modifier = Modifier.height(4.dp))
+            OutlinedButton(
+                onClick = { viewModel.exportMonitorDump() },
+                enabled = !ui.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.card_export_dump))
+            }
             OutlinedButton(
                 onClick = { viewModel.resetToWaiting() },
                 enabled = !ui.busy,

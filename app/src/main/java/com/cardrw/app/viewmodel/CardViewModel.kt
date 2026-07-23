@@ -4,9 +4,11 @@ import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.cardrw.app.BuildConfig
 import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.data.repository.AidNameRepository
 import com.cardrw.app.data.repository.ApduJournalRepository
+import com.cardrw.app.data.repository.DumpRepository
 import com.cardrw.app.data.repository.KeyVaultRepository
 import com.cardrw.app.nfc.IsoDepTransceiver
 import com.cardrw.app.nfc.NfcReaderController
@@ -16,6 +18,7 @@ import com.cardrw.desfire.client.DesfireProtocolException
 import com.cardrw.desfire.client.DesfireTransportException
 import com.cardrw.desfire.crypto.AesConstants
 import com.cardrw.desfire.crypto.SecureMessagingLevel
+import com.cardrw.desfire.dump.CardDumpBuilder
 import com.cardrw.desfire.model.Aid
 import com.cardrw.desfire.model.ApplicationExploreResult
 import com.cardrw.desfire.model.AuthBarrier
@@ -81,6 +84,11 @@ data class CardUiState(
      */
     val pendingWriteFileNo: Int? = null,
     /**
+     * Dernier dump exporté (JSON) — UI peut copier / partager.
+     */
+    val lastDumpJson: String? = null,
+    val lastDumpFileName: String? = null,
+    /**
      * Proposition d’enregistrer le matériau hex malgré un échec d’auth
      * (ex. bon secret, mauvais slot carte). Non null → dialog UI.
      */
@@ -122,6 +130,7 @@ class CardViewModel @Inject constructor(
     private val journalRepository: ApduJournalRepository,
     private val aidNames: AidNameRepository,
     private val keyVault: KeyVaultRepository,
+    private val dumpRepository: DumpRepository,
     private val tagBus: NfcTagBus,
 ) : ViewModel() {
 
@@ -176,6 +185,61 @@ class CardViewModel @Inject constructor(
     fun friendlyName(aidHex: String): String? = aidNames.nameFor(aidHex)
 
     fun nextVaultDefaultName(): String = keyVault.nextDefaultName()
+
+    fun clearLastDumpExport() {
+        _ui.update { it.copy(lastDumpJson = null, lastDumpFileName = null) }
+    }
+
+    /**
+     * Export dump moniteur (structure + données lues, **sans secrets**) →
+     * fichier local `filesDir/dumps` + JSON en mémoire pour copie presse-papiers.
+     */
+    fun exportMonitorDump() {
+        val identity = _ui.value.identity
+        if (identity == null) {
+            _ui.update { it.copy(errorMessage = "Aucune carte lue — pose une carte d’abord.") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(busy = true, errorMessage = null, statusLine = "Export dump…")
+            }
+            try {
+                val doc = CardDumpBuilder.build(
+                    identity = identity,
+                    exploreByAid = _ui.value.exploreByAid,
+                    realUidHex = _ui.value.realUidHex,
+                    appVersion = BuildConfig.VERSION_NAME,
+                    friendlyName = { aidNames.nameFor(it) },
+                )
+                val json = CardDumpBuilder.toPrettyJson(doc)
+                val item = withContext(Dispatchers.IO) {
+                    dumpRepository.save(doc, uidHint = identity.displayUid)
+                }
+                val unread = doc.structure.unreadFiles.size
+                val dataCount = doc.data.files.size
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        lastDumpJson = json,
+                        lastDumpFileName = item.fileName,
+                        statusLine = "Dump OK — ${item.fileName} · " +
+                            "${doc.structure.applications.size} app(s) · $dataCount fichier(s) lu(s)" +
+                            if (unread > 0) " · $unread non lu(s)" else "",
+                        errorMessage = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        errorMessage = "Export dump : ${e.message}",
+                        statusLine = null,
+                    )
+                }
+            }
+        }
+    }
 
     fun reloadVault() {
         viewModelScope.launch { keyVault.load() }

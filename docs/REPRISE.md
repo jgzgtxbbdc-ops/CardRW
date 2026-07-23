@@ -23,7 +23,7 @@
 | **Coffre-fort de clés** | 🔄 **K0–K2 ✅** — K3 biométrie optionnelle plus tard |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
 | Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
-| **v1** Write / Create / ChangeKey / dumps | 🔄 Write/Create/Delete ✅ ; ChangeKey AES+DES→AES ✅ ; **FormatPICC** ✅ ; dumps ⬜ |
+| **v1** Write / Create / ChangeKey / dumps | ✅ Write/Create/Delete ; ChangeKey AES+DES→AES ; FormatPICC ; **dumps moniteur** |
 
 ### v0.6 UX — moniteur Carte
 
@@ -178,8 +178,9 @@ Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 - AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) Dumps / export structure
+  A) Terrain dumps (export + liste + share)
   B) K3 biométrie coffre — non prioritaire
+  C) Restauration dump (v1.2) — plus tard
 Ne pas committer clés prod / dumps réels / local.properties
 ```
 
@@ -189,11 +190,11 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — Dumps** export arbre / hex.  
+   - **A — Terrain dumps** + polish export.  
    - **B — K3** biométrie coffre (optionnel).  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : auth auto **select + structure + intention fichier** livrés ; dumps ensuite.
+Avis fil rouge : dump moniteur **sans secrets** livré ; restore / include keys plus tard.
 
 ---
 
