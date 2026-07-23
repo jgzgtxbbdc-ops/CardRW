@@ -25,8 +25,19 @@ class DesLegacyChangeKeyTest {
     private val rndB = Hex.decode("FFEEDDCCBBAA9988")
 
     @Test
-    fun derive_session_key_2ktdea() {
+    fun derive_session_key_factory_zeros_collapses_to_des() {
+        // Usine 00…00 (K1=K2) → DES effectif : S = RndA[0..3]‖RndB[0..3] doublé
         val sk = DesLegacySession.deriveSessionKey(rndA, rndB, authKey)
+        assertEquals(
+            "00112233FFEEDDCC00112233FFEEDDCC",
+            Hex.encode(sk),
+        )
+    }
+
+    @Test
+    fun derive_session_key_true_2ktdea_no_collapse() {
+        val k2tdea = Hex.decode("00112233445566778899AABBCCDDEEFF")
+        val sk = DesLegacySession.deriveSessionKey(rndA, rndB, k2tdea)
         assertEquals(
             "00112233FFEEDDCC44556677BBAA9988",
             Hex.encode(sk),
@@ -47,9 +58,8 @@ class DesLegacyChangeKeyTest {
         assertEquals(0x80, payload[0].toInt() and 0xFF)
         assertEquals(1 + 24, payload.size)
 
-        // Inverse de SEND ENCYPHER = RECV DECYPHER (cbcReceive)
-        val recovered = payload.copyOfRange(1, payload.size)
-        DesCipher.cbcReceive(sessionKey, DesCipher.zeroIv(), recovered)
+        // Inverse de SEND DECYPHER (D40) : pt = ENC(ct) ⊕ IV
+        val recovered = inverseSendDecypher(sessionKey, payload.copyOfRange(1, payload.size))
         assertEquals(Hex.encode(expectedPadded), Hex.encode(recovered))
     }
 
@@ -126,9 +136,8 @@ class DesLegacyChangeKeyTest {
                     val sk = sessionKey!!
                     lastKeyNoWire = data[0].toInt() and 0xFF
                     check(lastKeyNoWire == 0x80) { "keyNo wire=${lastKeyNoWire.toString(16)}" }
-                    val plain = data.copyOfRange(1, data.size)
-                    // Inverse SEND ENCYPHER
-                    DesCipher.cbcReceive(sk, DesCipher.zeroIv(), plain)
+                    // Inverse SEND DECYPHER
+                    val plain = inverseSendDecypher(sk, data.copyOfRange(1, data.size))
                     // newKey (16) + ver (1) + crc (2)
                     val body = plain.copyOfRange(0, 17)
                     val gotCrc = plain.copyOfRange(17, 19)
@@ -145,5 +154,38 @@ class DesLegacyChangeKeyTest {
                 else -> error("Unexpected APDU step=$step cmd=${cmd.toString(16)}")
             }
         }
+
+        private fun inverseSendDecypher(key: ByteArray, cipher: ByteArray): ByteArray {
+            val out = cipher.copyOf()
+            val iv = DesCipher.zeroIv()
+            var offset = 0
+            while (offset < out.size) {
+                val ct = out.copyOfRange(offset, offset + 8)
+                val enc = DesCipher.encryptBlock(key, ct)
+                for (i in 0 until 8) {
+                    out[offset + i] = (enc[i].toInt() xor iv[i].toInt()).toByte()
+                }
+                ct.copyInto(iv)
+                offset += 8
+            }
+            return out
+        }
+    }
+
+    /** Inverse SEND DECYPHER pour assertions hors carte simulée. */
+    private fun inverseSendDecypher(key: ByteArray, cipher: ByteArray): ByteArray {
+        val out = cipher.copyOf()
+        val iv = DesCipher.zeroIv()
+        var offset = 0
+        while (offset < out.size) {
+            val ct = out.copyOfRange(offset, offset + 8)
+            val enc = DesCipher.encryptBlock(key, ct)
+            for (i in 0 until 8) {
+                out[offset + i] = (enc[i].toInt() xor iv[i].toInt()).toByte()
+            }
+            ct.copyInto(iv)
+            offset += 8
+        }
+        return out
     }
 }

@@ -66,12 +66,13 @@ class DesLegacySession(
      * ChangeKey (0xC4) DES legacy → nouvelle clé **AES-128**, cas **même slot**
      * (typiquement master PICC 0 authentifié).
      *
-     * Structure (freefare / NXP EV1) :
-     * - KeyNo wire = `keyNo | 0x80` (type AES sur PICC)
+     * Structure (freefare / Proxmark DACd40 / NXP EV1) :
+     * - KeyNo wire = `keyNo | 0x80` (type AES sur PICC master)
      * - Corps : `newKey ‖ version ‖ CRC16(newKey‖version) ‖ pad 00`
-     * - Crypto : CBC **SEND ENCYPHER** (même sens que AuthenticateDES terrain NXP),
-     *   IV remis à 0 — *pas* le SEND DECYPHER de libfreefare (incompatible avec
-     *   les blank NXP où l’auth n’accepte que ENCYPHER).
+     * - Crypto SM **D40** : CBC SEND + **DECYPHER** (xor IV puis DES decrypt),
+     *   IV remis à 0 — Proxmark force `xencode=false` en DACd40 pour tout envoi.
+     *   (L’auth `0x0A` blank NXP utilise ENCYPHER sur la **clé usine** ; le
+     *   ChangeKey chiffre avec la **session key** en mode D40 DECYPHER.)
      * - KeyNo reste **clair** en tête du data field
      *
      * @return data field APDU (sans opcode) : KeyNo ‖ cryptogramme
@@ -85,27 +86,30 @@ class DesLegacySession(
         require(newAesKey.size == 16) {
             "nouvelle clé AES 16 o, got ${newAesKey.size}"
         }
-        // PICC : bit 7 = AES (freefare) ; 3K3DES utiliserait 0x40
+        // PICC : bit 7 = AES (0x02<<6) ; 3K3DES = 0x40
         val keyNoWire = (keyNo and 0x0F) or KEYNO_AES_FLAG
         val plainBody = newAesKey + byteArrayOf((keyVersion and 0xFF).toByte())
         val crc = Iso14443aCrc16.computeBytes(plainBody)
         val toEnc = plainBody + crc
         val padded = padZerosToBlock(toEnc, DesConstants.BLOCK_SIZE)
-        // Aligné AuthenticateDES blank NXP : SEND = ENCYPHER CBC, IV = 0
-        DesCipher.cbcSendEncrypt(sessionKey, DesCipher.zeroIv(), padded)
+        // SM D40 post-auth : SEND DECYPHER, IV = 0
+        DesCipher.cbcSendLegacyDecrypt(sessionKey, DesCipher.zeroIv(), padded)
         return byteArrayOf(keyNoWire.toByte()) + padded
     }
 
     companion object {
-        /** Bit type AES sur KeyNo ChangeKey (PICC / master app crypto). */
+        /** Bit type AES sur KeyNo ChangeKey (PICC) — Proxmark `0x02 << 6`. */
         const val KEYNO_AES_FLAG: Int = 0x80
 
         /**
-         * Dérivation clé de session DESFire legacy (libfreefare
-         * `mifare_desfire_session_key_new`).
+         * Dérivation clé de session DESFire legacy.
          *
-         * - **DES 8 o** : `RndA[0..3]‖RndB[0..3]` puis doublé en 16 o (K1=K2)
+         * - **DES 8 o** : `RndA[0..3]‖RndB[0..3]` doublé en 16 o
          * - **2KTDEA 16 o** : `RndA[0..3]‖RndB[0..3]‖RndA[4..7]‖RndB[4..7]`
+         * - Si les deux moitiés de la clé d’auth sont **identiques** (usine 00…00),
+         *   le PICC traite en DES simple : **collapse** session
+         *   `S[0..7]‖S[0..7]` (Proxmark après `DesfireGenSessionKeyEV1`).
+         *   Sans collapse → cryptogramme ChangeKey rejeté en 0x1E.
          */
         fun deriveSessionKey(rndA: ByteArray, rndB: ByteArray, authKey: ByteArray): ByteArray {
             require(rndA.size == 8 && rndB.size == 8) {
@@ -117,8 +121,17 @@ class DesLegacySession(
                     half + half.copyOf()
                 }
                 16 -> {
-                    rndA.copyOfRange(0, 4) + rndB.copyOfRange(0, 4) +
+                    val sk = rndA.copyOfRange(0, 4) + rndB.copyOfRange(0, 4) +
                         rndA.copyOfRange(4, 8) + rndB.copyOfRange(4, 8)
+                    val k1 = authKey.copyOfRange(0, 8)
+                    val k2 = authKey.copyOfRange(8, 16)
+                    if (k1.contentEquals(k2)) {
+                        // DES effectif (K1=K2) : session = 8 o doublé
+                        val half = sk.copyOfRange(0, 8)
+                        half + half.copyOf()
+                    } else {
+                        sk
+                    }
                 }
                 else -> error("Clé DES/2KTDEA : 8 ou 16 o, got ${authKey.size}")
             }

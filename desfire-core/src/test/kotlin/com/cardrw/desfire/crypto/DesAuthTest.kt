@@ -29,8 +29,8 @@ class DesAuthTest {
         assertTrue(client.isAuthenticated)
         assertEquals(SecureMessagingLevel.DES_LEGACY, session.smLevel)
         assertEquals("Auth DES · legacy", session.badgeLabel)
-        // Session key 2KTDEA : RndA[0..3]‖RndB[0..3]‖RndA[4..7]‖RndB[4..7]
-        assertEquals("00112233FFEEDDCC44556677BBAA9988", Hex.encode(session.sessionKey))
+        // Usine K1=K2 → collapse DES : RndA[0..3]‖RndB[0..3] doublé
+        assertEquals("00112233FFEEDDCC00112233FFEEDDCC", Hex.encode(session.sessionKey))
     }
 
     @Test
