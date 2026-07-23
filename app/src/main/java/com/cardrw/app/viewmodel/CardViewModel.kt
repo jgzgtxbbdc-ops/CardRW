@@ -1077,8 +1077,9 @@ class CardViewModel @Inject constructor(
                 true
             },
             onFailure = {
+                // authenticate* clear la session client dès le début
                 syncJournal()
-                _ui.update { it.copy(busy = false) }
+                _ui.update { it.copy(busy = false, authSession = null) }
                 false
             },
         )
