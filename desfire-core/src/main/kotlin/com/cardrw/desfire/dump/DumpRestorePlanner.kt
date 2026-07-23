@@ -42,6 +42,10 @@ object DumpRestorePlanner {
             val aidHex: String,
             val fileNo: Int,
             val dataHex: String,
+            /** MDAR logique 16 bits (pour auth W/RW). */
+            val accessRights: Int,
+            /** Wire comm 0x00/01/03 — effectif si session a la clé W. */
+            val commSettings: Int,
             override val label: String,
         ) : Step()
         data class Skip(override val label: String) : Step()
@@ -128,6 +132,14 @@ object DumpRestorePlanner {
         }
 
         if (mode == Mode.STRUCTURE_AND_DATA || mode == Mode.DATA_ONLY) {
+            val fileMetaByKey = buildMap {
+                for (app in apps) {
+                    val a = app.aid.uppercase().replace(" ", "")
+                    for (f in app.files) {
+                        put("$a/${f.fileNo}", f)
+                    }
+                }
+            }
             for ((key, hex) in doc.data.files) {
                 val parts = key.split("/")
                 if (parts.size != 2) {
@@ -145,16 +157,23 @@ object DumpRestorePlanner {
                     steps += Step.Skip("Data vide pour $key")
                     continue
                 }
-                // Select avant write (redondant OK)
-                steps += Step.SelectApplication(
-                    aidHex = aid,
-                    label = "SelectApplication $aid (avant Write F$fileNo)",
+                val meta = fileMetaByKey["$aid/$fileNo"]
+                val rights = meta?.accessRightsRaw
+                    ?: meta?.accessRights?.let { parseRightsOrFree(it) }
+                    ?: 0xEEEE
+                val comm = parseCommWire(
+                    meta?.commMode ?: "FULL",
+                    meta?.commModeWire,
                 )
+                // Auth W/RW (pas master 0 si W=2) — select inclus dans ensureWrite
                 steps += Step.WriteData(
                     aidHex = aid,
                     fileNo = fileNo,
                     dataHex = clean.uppercase(),
-                    label = "WriteData $aid/F$fileNo (${clean.length / 2} B)",
+                    accessRights = rights,
+                    commSettings = comm,
+                    label = "WriteData $aid/F$fileNo (${clean.length / 2} B, " +
+                        "ar=0x${rights.toString(16)}, need W/RW key)",
                 )
             }
         }

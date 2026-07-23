@@ -58,7 +58,9 @@ class DumpRestorePlannerTest {
         assertTrue(plan.steps.any { it is DumpRestorePlanner.Step.FormatPicc })
         assertTrue(plan.steps.any { it is DumpRestorePlanner.Step.CreateApplication })
         assertTrue(plan.steps.any { it is DumpRestorePlanner.Step.CreateStdDataFile })
-        assertTrue(plan.steps.any { it is DumpRestorePlanner.Step.WriteData })
+        val write = plan.steps.filterIsInstance<DumpRestorePlanner.Step.WriteData>().single()
+        assertEquals(0xEEEE, write.accessRights)
+        assertEquals(0x03, write.commSettings)
         assertTrue(plan.actionableCount >= 4)
     }
 }

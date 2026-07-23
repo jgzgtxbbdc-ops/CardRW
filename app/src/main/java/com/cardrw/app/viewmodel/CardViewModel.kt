@@ -21,6 +21,7 @@ import com.cardrw.desfire.crypto.DesConstants
 import com.cardrw.desfire.crypto.SecureMessagingLevel
 import com.cardrw.desfire.dump.CardDumpBuilder
 import com.cardrw.desfire.dump.DumpRestorePlanner
+import com.cardrw.desfire.model.AccessRights
 import com.cardrw.desfire.model.Aid
 import com.cardrw.desfire.model.CommMode
 import com.cardrw.desfire.model.ApplicationExploreResult
@@ -31,7 +32,9 @@ import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.CardIdentity
 import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
+import com.cardrw.desfire.model.canWriteWith
 import com.cardrw.desfire.model.readKeyCandidates
+import com.cardrw.desfire.model.writeKeyCandidates
 import com.cardrw.desfire.session.AuthSession
 import com.cardrw.desfire.session.DesLegacySession
 import com.cardrw.desfire.util.Hex
@@ -2084,9 +2087,20 @@ class CardViewModel @Inject constructor(
                         }
                         is DumpRestorePlanner.Step.WriteData -> {
                             _ui.update { it.copy(statusLine = step.label) }
-                            if (!ensureAppMasterAesSession(step.aidHex)) {
-                                errors += "Write ${step.aidHex}/F${step.fileNo} : auth KO"
+                            // Auth avec clé W/RW (ex. W=2), pas master 0 si hors droits
+                            if (!ensureAppWriteAesSession(step.aidHex, step.accessRights)) {
+                                errors += "Write ${step.aidHex}/F${step.fileNo} : " +
+                                    "auth W/RW KO (droits 0x${step.accessRights.toString(16)} — " +
+                                    "clé non usine ?)"
                                 continue
+                            }
+                            val rights = AccessRights.parse(step.accessRights)
+                            val sessionKey = _ui.value.authSession?.keyNumber
+                            // freefare : sans clé W → PLAIN même si fichier FULL
+                            val mode = if (rights.sessionHasWriteKey(sessionKey)) {
+                                CommMode.fromWire(step.commSettings)
+                            } else {
+                                CommMode.PLAIN
                             }
                             val bytes = Hex.decode(step.dataHex)
                             val r = withContext(Dispatchers.IO) {
@@ -2096,25 +2110,19 @@ class CardViewModel @Inject constructor(
                                     ) {
                                         error("Session app ${step.aidHex} absente avant Write")
                                     }
-                                    try {
-                                        client.writeData(
-                                            step.fileNo,
-                                            bytes,
-                                            offset = 0,
-                                            commMode = CommMode.FULL,
-                                        )
-                                    } catch (_: Exception) {
-                                        client.writeData(
-                                            step.fileNo,
-                                            bytes,
-                                            offset = 0,
-                                            commMode = CommMode.PLAIN,
-                                        )
-                                    }
+                                    client.writeData(
+                                        step.fileNo,
+                                        bytes,
+                                        offset = 0,
+                                        commMode = mode,
+                                    )
                                 }
                             }
                             if (r.isFailure) {
-                                errors += "Write ${step.aidHex}/F${step.fileNo}: ${r.exceptionOrNull()?.message}"
+                                // 0xAE tue la session — ne pas enchaîner sans re-auth
+                                val em = r.exceptionOrNull()?.message
+                                errors += "Write ${step.aidHex}/F${step.fileNo}: $em"
+                                _ui.update { it.copy(authSession = null) }
                             } else {
                                 done++
                             }
@@ -2153,50 +2161,142 @@ class CardViewModel @Inject constructor(
         }
     }
 
-    /** Auth master app (clé 0) usine ou mémorisée — pour CreateFile / Write restore. */
-    private suspend fun ensureAppMasterAesSession(aidHex: String): Boolean {
-        val aid = aidHex.uppercase()
+    /** Auth master app (clé 0) usine ou mémorisée — CreateFile / structure. */
+    private suspend fun ensureAppMasterAesSession(aidHex: String): Boolean =
+        ensureAppSlotAesSession(aidHex, preferredKeyNos = listOf(0))
+
+    /**
+     * Auth pour **WriteData** restore : slots W puis RW (pas master 0 si hors droits).
+     * Ex. wire rights `20 12` → R=1 W=2 RW=2 Ch=0 → auth **k2**.
+     * Matériau : mémorisé puis usine 00…00 (labo).
+     */
+    private suspend fun ensureAppWriteAesSession(aidHex: String, accessRightsLogical: Int): Boolean {
+        val rights = AccessRights.parse(accessRightsLogical)
+        if (rights.isWriteFree) {
+            // Free write : n’importe quelle session AES app (master 0 labo) + PLAIN côté write
+            return ensureAppSlotAesSession(aidHex, preferredKeyNos = listOf(0))
+        }
+        val candidates = rights.writeKeyCandidates().map { it.keyNo }
+        if (candidates.isEmpty()) return false
+        // Session courante déjà W/RW ?
         val sess = _ui.value.authSession
         if (sess?.authenticated == true &&
-            sess.aidHex.equals(aid, ignoreCase = true) &&
-            sess.keyNumber == 0 &&
+            sess.aidHex.equals(aidHex, ignoreCase = true) &&
+            rights.canWriteWith(sess.keyNumber) &&
             sess.smLevel != SecureMessagingLevel.DES_LEGACY
         ) {
+            val liveOk = withContext(Dispatchers.IO) {
+                withLiveClient { c ->
+                    c.session != null &&
+                        c.selectedAid?.hex?.equals(aidHex, true) == true &&
+                        rights.canWriteWith(c.session?.keyNumber)
+                }.getOrDefault(false)
+            }
+            if (liveOk) return true
+        }
+        return ensureAppSlotAesSession(aidHex, preferredKeyNos = candidates)
+    }
+
+    /**
+     * Auth AES sur [aidHex] en essayant les slots [preferredKeyNos] (mémorisé puis usine).
+     * Vérifie la session **live** (Select tue la SM).
+     */
+    private suspend fun ensureAppSlotAesSession(
+        aidHex: String,
+        preferredKeyNos: List<Int>,
+    ): Boolean {
+        val aid = aidHex.uppercase()
+        val slots = preferredKeyNos.map { it and 0x0F }.distinct().filter { it in 0..13 }
+        if (slots.isEmpty()) return false
+
+        // Déjà live OK sur un des slots
+        val liveKey = withContext(Dispatchers.IO) {
+            withLiveClient { c ->
+                val s = c.session
+                if (s != null &&
+                    c.selectedAid?.hex?.equals(aid, true) == true &&
+                    s.smLevel != SecureMessagingLevel.DES_LEGACY &&
+                    (s.keyNumber and 0x0F) in slots
+                ) {
+                    s.keyNumber and 0x0F
+                } else {
+                    null
+                }
+            }.getOrNull()
+        }
+        if (liveKey != null) {
+            val live = withContext(Dispatchers.IO) {
+                withLiveClient { it.authSession }.getOrNull()
+            }
+            if (live != null) {
+                _ui.update {
+                    it.copy(authSession = live, selectedAidHex = aid, errorMessage = null)
+                }
+            }
             return true
         }
-        val remembered = rememberedKeysByAid[aid]?.get(0)
-        if (remembered != null) {
-            val ok = silentAuthThenExplore(
-                aidHex = aid,
-                remembered = remembered,
-                flashMessage = null,
-                fillRemembered = false,
+
+        for (keyNo in slots) {
+            val remembered = rememberedKeysByAid[aid]?.get(keyNo)
+            if (remembered != null) {
+                val ok = silentAuthThenExplore(
+                    aidHex = aid,
+                    remembered = remembered,
+                    flashMessage = null,
+                    fillRemembered = false,
+                    allowDesFactoryFallback = false,
+                )
+                if (ok) {
+                    val after = _ui.value.authSession
+                    if (after?.keyNumber == keyNo &&
+                        after.smLevel != SecureMessagingLevel.DES_LEGACY
+                    ) {
+                        return true
+                    }
+                }
+            }
+            // Usine 00…00 sur ce slot
+            val keyBytes = AesConstants.FACTORY_KEY.copyOf()
+            val result = withContext(Dispatchers.IO) {
+                withLiveClient { client ->
+                    client.ensureApplicationSelected(Aid.fromHex(aid))
+                    // Select a pu tuer une ancienne session
+                    client.authenticateAesPreferEv1(
+                        keyNo = keyNo,
+                        key = keyBytes,
+                        aidHex = aid,
+                        allowDesFactoryFallback = false,
+                    )
+                    client.authSession
+                }
+            }
+            val ok = result.fold(
+                onSuccess = { session ->
+                    if (session == null ||
+                        session.smLevel == SecureMessagingLevel.DES_LEGACY
+                    ) {
+                        false
+                    } else {
+                        rememberAuth(aid, keyNo, keyBytes, vaultEntryId = null)
+                        _ui.update {
+                            it.copy(
+                                authSession = session,
+                                selectedAidHex = aid,
+                                errorMessage = null,
+                            )
+                        }
+                        syncJournal()
+                        true
+                    }
+                },
+                onFailure = {
+                    syncJournal()
+                    false
+                },
             )
             if (ok) return true
         }
-        val keyBytes = AesConstants.FACTORY_KEY.copyOf()
-        val result = withContext(Dispatchers.IO) {
-            withLiveClient { client ->
-                client.ensureApplicationSelected(Aid.fromHex(aid))
-                client.authenticateAesPreferEv1(0, keyBytes, aid)
-                client.authSession
-            }
-        }
-        return result.fold(
-            onSuccess = { session ->
-                rememberAuth(aid, 0, keyBytes, vaultEntryId = null)
-                _ui.update {
-                    it.copy(
-                        authSession = session,
-                        selectedAidHex = aid,
-                        errorMessage = null,
-                    )
-                }
-                syncJournal()
-                true
-            },
-            onFailure = { false },
-        )
+        return false
     }
 
     /** CreateStdDataFile labo (FULL, droits Free 0xEEEE par défaut). */
