@@ -145,19 +145,34 @@ Carte posée
   → [GetCardUID auto plus tard si Random + auth]
 
 Expand / select Application (ou focus PICC)
-  → SelectApplication + explore auto
-  → nœuds structure / fichiers remplis (partiel OK)
+  → SelectApplication
+  → **auth auto** (mémorisée AID → usine clé 0) + flash « clé n° · droits »
+  → explore / fill multi-clés
+  → nœuds structure / fichiers (partiel OK)
 
-Tap « Authentifier pour … » sur nœud lacunaire
-  → sheet AuthRequest(candidates)
+Tap CTA sur nœud lacunaire (fichier / structure)
+  → **cible** : auth auto sur candidat du nœud (R/W/master mémorisé ou usine)
+  → sinon sheet AuthRequest(candidates)
   → OK → AuthenticateAES → resume intention + refresh moniteur
 
 Actualiser (optionnel)
   → re-explore contexte courant
 ```
 
-**Ne pas** auto-auth avec clé usine sans geste utilisateur (tentatives / cartes inconnues).  
-Option labo opt-in éventuelle : hors scope U1–U4.
+### Philosophie session (product, 2026-07-23)
+
+**Ne jamais refaire manuellement une opération déjà validée dans la session carte.**
+
+| Déjà fait | Comportement attendu |
+|---|---|
+| Auth OK sur un slot | Mémorisée ; rejeu au select / structure / CTA |
+| Create / Format / Delete app | Re-auth PICC master auto (Select dans `readIdentity` invalide la SM) |
+| AIDs / FileNo existants | Suggestions libres (pas de doublon) |
+
+**Évolution vs U1–U4 :** l’auto-auth usine **au select** est désormais le défaut moniteur labo
+(geste = sélection nœud). Sheet manuelle seulement si mémorisée + usine échouent.
+
+**Dette ouverte :** auth auto **par intention** (clic fichier → slot R/RW, pas forcément master 0).
 
 ---
 

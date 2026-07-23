@@ -168,11 +168,17 @@ NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
   ReadData FULL TX=PLAIN inchangé ; Write 0x3D header=7 ; ChangeKey 0xC4 header=1
 Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 
-État récent : cycle vierge DES→AES + Create/Write/Delete + FormatPICC livrés
-  (Format = master PICC AES clé 0, apps effacées, master key conservée).
+État récent : cycle vierge + FormatPICC + auto-auth moniteur (select / structure).
+
+### Philosophie moniteur (product)
+
+**Ne jamais refaire manuellement une opération déjà validée dans la session carte** :
+- clé OK → mémoire VM par AID/slot ; rejeu auto au select / structure
+- Create/Format/Delete app → `ensurePiccMasterAesSession` + restore post-`readIdentity`
+- AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) Terrain FormatPICC (carte sacrifiable AES)
+  A) Auth auto **par intention / nœud** (clé 2 lecture vs 0 structure selon CTA)
   B) Dumps / export structure
   C) K3 biométrie coffre — non prioritaire
 Ne pas committer clés prod / dumps réels / local.properties
@@ -184,12 +190,12 @@ Ne pas committer clés prod / dumps réels / local.properties
 
 1. **`git pull`** + tests verts + 5 min terrain (ne rien casser).  
 2. **Une** des pistes (ne pas tout mélanger) :
-   - **A — Terrain FormatPICC** : PICC AES master → Formater → apps vides → re-auth.  
+   - **A — Auth auto fine** : selon nœud / intention (R vs master), flash droits R/W/RW.  
    - **B — Dumps** export arbre / hex.  
    - **C — K3** biométrie coffre (optionnel).  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 
-Avis fil rouge : labo structure complet sauf dumps ; **valider FormatPICC terrain**.
+Avis fil rouge : auto-auth **select + structure** livré ; peaufiner **par nœud fichier**.
 
 ---
 
@@ -205,7 +211,15 @@ Avis fil rouge : labo structure complet sauf dumps ; **valider FormatPICC terrai
 
 ---
 
-## Dettes notées (Claude / revue) — pas urgent ce soir
+## Dettes notées — moniteur / auth
+
+- **Auth auto par intention** (prioritaire produit) : au clic fichier / CTA, choisir le slot
+  candidat (R vs W vs master) mémorisé ou usine, flash « clé n°X · droits R/W/RW » ;
+  ne pas toujours forcer clé 0 au select app si une clé lecture suffit pour le contexte.
+- CTA fichier / fill multi-clés : déjà partiel (`tryAuthFileWithRemembered`, fill usine) — unifier
+  avec la philo « zéro re-saisie ».
+
+## Dettes notées (crypto / dettes code)
 
 - Auth EV2 **livré** (`authenticateEv2First` + fallback) — valider ReadData FULL EV2 terrain  
 - AuthenticateEV2NonFirst (`0x77`) non livré
