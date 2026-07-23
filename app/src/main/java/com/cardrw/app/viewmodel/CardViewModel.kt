@@ -1579,15 +1579,18 @@ class CardViewModel @Inject constructor(
             }
             result.fold(
                 onSuccess = {
+                    // Message stable : runExplore écraserait sinon avec « Exploration : n fichier(s) ».
+                    val okMsg = "CreateStdDataFile OK — F$fileNo ($sizeBytes B)"
                     _ui.update {
                         it.copy(
                             busy = false,
-                            statusLine = "CreateStdDataFile OK — fichier $fileNo ($sizeBytes o)",
+                            statusLine = okMsg,
                             errorMessage = null,
                         )
                     }
                     syncJournal()
                     _ui.value.selectedAidHex?.let { runExplore(it, fillRemembered = true) }
+                    _ui.update { it.copy(statusLine = okMsg, busy = false, errorMessage = null) }
                 },
                 onFailure = { e -> handleOpFailure(e) },
             )

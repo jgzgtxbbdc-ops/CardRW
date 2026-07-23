@@ -104,8 +104,9 @@
     <string name="card_create_app_sheet_hint">PICC master AES (re-auth auto si besoin). Settings labo ouverts (0x0F), crypto AES. L’AID proposé évite les apps déjà présentes.</string>
     <string name="card_create_app_suggest">Suggestion libre : %1$s</string>
     <string name="card_create_file_sheet_title">Ajouter un fichier</string>
-    <string name="card_create_file_sheet_hint">Standard Data, FULL, droits Free (labo). MaxKeys / structure = session maître app.</string>
+    <string name="card_create_file_sheet_hint">Standard Data, FULL, droits Free (labo). MaxKeys / structure = session maître app. La sheet reste ouverte : n° suivant auto.</string>
     <string name="card_create_file_sheet_action">Créer le fichier</string>
+    <string name="card_create_file_suggest">Prochain libre : %1$d</string>
     <string name="card_delete_app_title">Supprimer l’application ?</string>
     <string name="card_delete_app_message">AID %1$s sera effacée de la carte (irréversible).</string>
     <string name="card_delete_file_title">Supprimer le fichier ?</string>

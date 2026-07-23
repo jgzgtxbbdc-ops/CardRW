@@ -578,6 +578,7 @@ private fun ReadyMonitor(
     }
 
     if (showCreateFile) {
+        // Premier n° libre (0–31) — se met à jour après Create OK + re-explore.
         val existing = ui.explore?.files?.map { it.fileNo }?.toSet().orEmpty()
         val nextNo = (0..31).firstOrNull { it !in existing } ?: 0
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -588,6 +589,7 @@ private fun ReadyMonitor(
             CreateFileSheetContent(
                 suggestedFileNo = nextNo,
                 busy = ui.busy,
+                statusLine = ui.statusLine,
                 errorMessage = ui.errorMessage,
                 onDismiss = { if (!ui.busy) showCreateFile = false },
                 onCreate = { no, size -> viewModel.createStdFileLab(no, size) },
@@ -672,15 +674,7 @@ private fun ReadyMonitor(
         )
     }
 
-    // Fermer sheet fichier après succès ; Create app reste ouvert (AID suivant auto)
-    LaunchedEffect(ui.busy, ui.statusLine, ui.errorMessage) {
-        if (!ui.busy && ui.errorMessage == null) {
-            when {
-                ui.statusLine?.startsWith("CreateStdDataFile OK") == true -> showCreateFile = false
-            }
-        }
-    }
-
+    // Create app / Create file restent ouverts après succès (n°/AID suivant auto + message OK).
     // Upgrade AES : fermer dès que la session n’est plus DES (succès ou re-auth AES).
     // Ne pas s’appuyer sur statusLine — runExplore l’écrase immédiatement après la bascule.
     LaunchedEffect(desToAesEnabled, showUpgradeAes) {
@@ -1435,12 +1429,19 @@ private fun CreateAppSheetContent(
 private fun CreateFileSheetContent(
     suggestedFileNo: Int,
     busy: Boolean,
+    statusLine: String?,
     errorMessage: String?,
     onDismiss: () -> Unit,
     onCreate: (fileNo: Int, size: Int) -> Unit,
 ) {
-    var fileNoText by rememberSaveable { mutableStateOf(suggestedFileNo.toString()) }
+    // Pas de rememberSaveable : sinon le n° reste collé à 0 après un Create OK.
+    var fileNoText by remember(suggestedFileNo) { mutableStateOf(suggestedFileNo.toString()) }
     var sizeText by rememberSaveable { mutableStateOf("16") }
+    // Après Create OK, explore met à jour les files → suggestion = prochain libre.
+    LaunchedEffect(suggestedFileNo) {
+        if (!busy) fileNoText = suggestedFileNo.toString()
+    }
+    val justCreated = statusLine?.startsWith("CreateStdDataFile OK") == true && !busy
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1464,6 +1465,9 @@ private fun CreateFileSheetContent(
             onValueChange = { fileNoText = it.filter { c -> c.isDigit() }.take(2) },
             modifier = Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.card_lab_file_no)) },
+            supportingText = {
+                Text(stringResource(R.string.card_create_file_suggest, suggestedFileNo))
+            },
             singleLine = true,
             enabled = !busy,
         )
@@ -1475,6 +1479,16 @@ private fun CreateFileSheetContent(
             singleLine = true,
             enabled = !busy,
         )
+        if (justCreated && statusLine != null) {
+            Text(
+                text = statusLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (statusLine != null && busy) {
+            BusyLabel(busy = true, text = statusLine)
+        }
         if (errorMessage != null) {
             Text(errorMessage, color = MaterialTheme.colorScheme.error)
         }
