@@ -8,10 +8,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.cardrw.app.nfc.NfcReaderController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import com.cardrw.app.ui.screens.card.CardScreen
 import com.cardrw.app.ui.screens.dumps.DumpsScreen
 import com.cardrw.app.ui.screens.home.HomeScreen
 import com.cardrw.app.ui.screens.journal.JournalScreen
+import com.cardrw.app.ui.screens.profiles.ProfileDetailScreen
+import com.cardrw.app.ui.screens.profiles.ProfilesScreen
 import com.cardrw.app.ui.screens.templates.TemplatesScreen
 import com.cardrw.app.ui.screens.vault.VaultScreen
 import com.cardrw.app.viewmodel.AppNavViewModel
@@ -20,9 +24,13 @@ object Routes {
     const val HOME = "home"
     const val CARD = "card"
     const val VAULT = "vault"
+    const val PROFILES = "profiles"
+    const val PROFILE_DETAIL = "profiles/{profileId}"
     const val TEMPLATES = "templates"
     const val DUMPS = "dumps"
     const val JOURNAL = "journal"
+
+    fun profileDetail(profileId: String) = "profiles/$profileId"
 }
 
 @Composable
@@ -48,6 +56,7 @@ fun CardRwNavHost(
             HomeScreen(
                 onOpenCard = { navController.navigate(Routes.CARD) },
                 onOpenVault = { navController.navigate(Routes.VAULT) },
+                onOpenProfiles = { navController.navigate(Routes.PROFILES) },
                 onOpenTemplates = { navController.navigate(Routes.TEMPLATES) },
                 onOpenDumps = { navController.navigate(Routes.DUMPS) },
                 onOpenJournal = { navController.navigate(Routes.JOURNAL) },
@@ -58,6 +67,18 @@ fun CardRwNavHost(
         }
         composable(Routes.VAULT) {
             VaultScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.PROFILES) {
+            ProfilesScreen(
+                onBack = { navController.popBackStack() },
+                onOpenProfile = { id -> navController.navigate(Routes.profileDetail(id)) },
+            )
+        }
+        composable(
+            route = Routes.PROFILE_DETAIL,
+            arguments = listOf(navArgument("profileId") { type = NavType.StringType }),
+        ) {
+            ProfileDetailScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.TEMPLATES) {
             TemplatesScreen(onBack = { navController.popBackStack() })

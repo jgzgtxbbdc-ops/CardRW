@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.automirrored.outlined.ListAlt
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.ViewModule
@@ -34,6 +35,7 @@ import com.cardrw.app.R
 fun HomeScreen(
     onOpenCard: () -> Unit,
     onOpenVault: () -> Unit,
+    onOpenProfiles: () -> Unit,
     onOpenTemplates: () -> Unit,
     onOpenDumps: () -> Unit,
     onOpenJournal: () -> Unit,
@@ -83,6 +85,14 @@ fun HomeScreen(
                     title = stringResource(R.string.nav_vault),
                     description = stringResource(R.string.nav_vault_desc),
                     onClick = onOpenVault,
+                )
+            }
+            item {
+                HomeEntry(
+                    icon = Icons.Outlined.Key,
+                    title = stringResource(R.string.nav_profiles),
+                    description = stringResource(R.string.nav_profiles_desc),
+                    onClick = onOpenProfiles,
                 )
             }
             item {

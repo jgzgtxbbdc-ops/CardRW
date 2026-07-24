@@ -1,6 +1,6 @@
 # UX profil de clés (key set)
 
-**Statut :** spec P0 — 2026-07-23  
+**Statut :** P0 spec + **P1 livré** (modèle + repo + écran CRUD) — 2026-07-24  
 **Portée :** relier **slots carte** et **matériaux coffre** pour dump / encode / moniteur multi-clés sans saisie manuelle à chaque intention  
 **Motivation :** une carte DESFire réelle n’a pas « une clé » — elle a un **jeu** (PICC master + maîtres app + R/W par fichier)  
 **Liens :** coffre [`UX_COFFRE_CLES.md`](UX_COFFRE_CLES.md) · moniteur [`UX_ECRAN_CARTE.md`](UX_ECRAN_CARTE.md) · CDC §6.2.1 / §7.3 / §8 · restore `DumpRestorePlanner`
@@ -291,16 +291,16 @@ Série : même profil + variables `{{uid}}` / `{{counter}}` — le profil ne cha
 
 ## 7. Tranches d’implémentation
 
-| ID | Contenu | Critère « done » | Dépendances |
-|----|---------|------------------|-------------|
-| **P0** | Cette spec + renvois REPRISE / CDC / coffre | Docs merge | — |
-| **P1** | Modèle `KeyProfile` + repo + écran liste/détail CRUD bindings | CRUD sans NFC | Coffre K1+ |
-| **P2** | `KeyMaterialResolver` branché moniteur (select / CTA / write) | Auth multi-clés sans retaper si profil complet | P1, U4b |
-| **P3** | Capture « Enregistrer ce jeu » depuis `rememberedKeysByAid` | 1 session → 1 profil | P1–P2 |
-| **P4** | Dump **Complet avec profil** + dry-run couverture | Fichiers non usine lus si bindings OK | P2, CardDumpBuilder |
-| **P5** | Restore/encode : resolve W/RW + dry-run matériaux | Encode non-usine labo | P2, DumpRestorePlanner |
-| **P6** | Chip profil actif moniteur + polish + export portable noms | UX atelier fluide | P1–P3 |
-| **P7** | Templates liés au profil | Série v1.1 | P5, templates |
+| ID | Contenu | Critère « done » | Dépendances | État |
+|----|---------|------------------|-------------|------|
+| **P0** | Cette spec + renvois REPRISE / CDC / coffre | Docs merge | — | ✅ |
+| **P1** | Modèle `KeyProfile` + repo + écran liste/détail CRUD bindings | CRUD sans NFC | Coffre K1+ | ✅ |
+| **P2** | `KeyMaterialResolver` branché moniteur (select / CTA / write) | Auth multi-clés sans retaper si profil complet | P1, U4b | ⬜ |
+| **P3** | Capture « Enregistrer ce jeu » depuis `rememberedKeysByAid` | 1 session → 1 profil | P1–P2 | ⬜ |
+| **P4** | Dump **Complet avec profil** + dry-run couverture | Fichiers non usine lus si bindings OK | P2, CardDumpBuilder | ⬜ |
+| **P5** | Restore/encode : resolve W/RW + dry-run matériaux | Encode non-usine labo | P2, DumpRestorePlanner | ⬜ |
+| **P6** | Chip profil actif moniteur + polish + export portable noms | UX atelier fluide | P1–P3 | ⬜ |
+| **P7** | Templates liés au profil | Série v1.1 | P5, templates | ⬜ |
 
 **Ordre recommandé :** P0 (ce doc) → **P1 → P3 → P2** (créer depuis session d’abord, utile tout de suite) → P4 → P5 → P6.
 
@@ -375,15 +375,26 @@ desfire-core/   (inchangé pour le secret)
 
 ---
 
-## 12. Décisions ouvertes (trancher en P1)
+## 12. Décisions (figées P1)
 
-| # | Question | Proposition par défaut |
+| # | Question | Décision |
 |---|---|---|
-| D1 | Profil actif global vs par écran | **Global session UI** (un chip) |
-| D2 | Plusieurs bindings même slot | **Non** — un seul ; historique hors scope |
+| D1 | Profil actif global vs par écran | **Global session UI** (chip moniteur en P2/P6) |
+| D2 | Plusieurs bindings même slot | **Non** — un seul ; `upsert` remplace (scope,keyNo) |
 | D3 | AID inconnu du profil | Explorer en free-list / usine ; ne pas inventer de bindings |
-| D4 | Nommer auto les entrées coffre à la capture | Oui, suggestion K4 `AID · kN · rôle`, éditable |
+| D4 | Nommer auto les entrées coffre à la capture | Oui (P3), suggestion K4 `AID · kN · rôle`, éditable |
 | D5 | Persister aussi les échecs usine dans le profil | **Non** — seulement session (évite faux négatifs cross-cartes) |
+
+### P1 livré (code)
+
+| Élément | Emplacement |
+|---|---|
+| Modèle | `app/.../data/model/KeyProfile.kt` |
+| Règles / unicité | `KeyProfileRules` |
+| Repo meta JSON | `KeyProfileRepository` → `key_profiles_meta.json` |
+| UI | `ProfilesScreen` + `ProfileDetailScreen` |
+| Nav | Accueil → Profils de clés (à côté du Coffre) |
+| Tests | `KeyProfileRulesTest` |
 
 ---
 
@@ -393,4 +404,4 @@ desfire-core/   (inchangé pour le secret)
 
 ---
 
-*Mettre à jour ce fichier quand P1 démarre (décisions D1–D5 figées) et à chaque tranche livrée.*
+*Mettre à jour ce fichier à chaque tranche livrée (P2+).*

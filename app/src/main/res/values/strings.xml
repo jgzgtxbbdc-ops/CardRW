@@ -9,6 +9,8 @@
     <string name="nav_card_desc">Lire / encoder une carte (wizard + explorateur)</string>
     <string name="nav_vault">Coffre-fort</string>
     <string name="nav_vault_desc">Clés AES nommées (labo) — pas de retape hex</string>
+    <string name="nav_profiles">Profils de clés</string>
+    <string name="nav_profiles_desc">Bindings slot×contexte → coffre (dump / encode multi-clés)</string>
     <string name="nav_templates">Templates</string>
     <string name="nav_templates_desc">Créer, éditer, lancer une série (v1.1)</string>
     <string name="nav_dumps">Dumps</string>
@@ -193,6 +195,51 @@
     <string name="vault_unlock_action">Déverrouiller</string>
     <string name="vault_lock_now">Verrouiller maintenant</string>
 
+    <!-- Profils de clés (P1) -->
+    <string name="profiles_title">Profils de clés</string>
+    <string name="profiles_disclaimer">Un profil relie des slots carte (PICC / AID + n° 0–13) à des entrées du coffre — sans recopier les secrets. Pas besoin de NFC pour gérer les profils.</string>
+    <string name="profiles_empty">Aucun profil. Crée « Site A » puis lie PICC k0 et les slots app aux matériaux du coffre.</string>
+    <string name="profiles_add">Nouveau profil</string>
+    <string name="profiles_name">Nom du profil</string>
+    <string name="profiles_notes">Notes (optionnel)</string>
+    <string name="profiles_save">Enregistrer</string>
+    <string name="profiles_rename">Renommer</string>
+    <string name="profiles_delete">Supprimer</string>
+    <string name="profiles_delete_title">Supprimer le profil ?</string>
+    <string name="profiles_delete_message">« %1$s » et ses bindings seront effacés (les entrées du coffre restent intactes).</string>
+    <string name="profiles_delete_confirm">Supprimer</string>
+    <string name="profiles_list_meta">%1$d binding(s) · maj. %2$s</string>
+    <string name="profiles_fallback_on_short">Fallback usine si slot inconnu</string>
+    <string name="profiles_fallback_title">Fallback usine</string>
+    <string name="profiles_fallback_hint">Si un slot n’a pas de binding, tenter 00…00 (labo). Désactiver en atelier « prod ».</string>
+    <string name="profiles_detail_hint">Bindings = plan d’attaque. Matériau = coffre ou usine. Slot carte ≠ nom coffre ≠ nom profil.</string>
+    <string name="profiles_bindings_header">Bindings (%1$d)</string>
+    <string name="profiles_bindings_empty">Aucun binding. Ajoute PICC k0, puis les slots app utiles.</string>
+    <string name="profiles_add_binding">+ Binding</string>
+    <string name="profiles_edit_binding">Modifier le binding</string>
+    <string name="profiles_delete_binding">Retirer le binding</string>
+    <string name="profiles_scope_picc">PICC (master carte)</string>
+    <string name="profiles_scope_app">App %1$s</string>
+    <string name="profiles_scope_app_short">Application (AID)</string>
+    <string name="profiles_scope_label">Contexte</string>
+    <string name="profiles_aid_hex">AID (6 hex)</string>
+    <string name="profiles_aid_hint">Ex. F40101 — 6 caractères hex</string>
+    <string name="profiles_key_no">Slot carte (0–13)</string>
+    <string name="profiles_key_no_hint">Index DESFire sur PICC ou application</string>
+    <string name="profiles_slot_label">Slot carte n°%1$d</string>
+    <string name="profiles_role_hint">Rôle (UI)</string>
+    <string name="profiles_role_hint_support">Optionnel : master, read, write…</string>
+    <string name="profiles_material_factory">Usine 00…00</string>
+    <string name="profiles_material_vault">Matériau : %1$s</string>
+    <string name="profiles_material_missing">⚠ entrée manquante : %1$s</string>
+    <string name="profiles_material_vault_label">Entrée coffre</string>
+    <string name="profiles_pick_vault">Choisir une entrée…</string>
+    <string name="profiles_vault_empty_hint">Coffre vide — crée d’abord une clé dans Coffre-fort, ou choisis usine.</string>
+    <string name="profiles_required">Required (stop dump/encode si échec)</string>
+    <string name="profiles_required_short">req</string>
+    <string name="profiles_binding_editor_hint">Un seul binding par couple (contexte, slot). Remplacer = même slot.</string>
+    <string name="profiles_vocab_hint">Slot carte = index DESFire · Coffre = nom→matériau · Profil = où coller le matériau.</string>
+    <string name="profiles_not_found">Profil introuvable (supprimé ?).</string>
 
     <!-- Explorateur -->
     <string name="card_explorer_title">Explorateur · %1$s</string>
