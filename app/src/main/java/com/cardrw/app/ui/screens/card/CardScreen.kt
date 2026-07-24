@@ -451,6 +451,20 @@ private fun ReadyMonitor(
             }
 
             Spacer(modifier = Modifier.height(4.dp))
+            if (ui.rememberedSlotCount > 0) {
+                Button(
+                    onClick = { viewModel.openCaptureFromSession() },
+                    enabled = !ui.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        stringResource(
+                            R.string.card_capture_profile,
+                            ui.rememberedSlotCount,
+                        ),
+                    )
+                }
+            }
             OutlinedButton(
                 onClick = { viewModel.exportMonitorDump() },
                 enabled = !ui.busy,
@@ -587,6 +601,26 @@ private fun ReadyMonitor(
                     showProfilePicker = false
                 },
                 onDismiss = { showProfilePicker = false },
+            )
+        }
+    }
+
+    ui.capturePreview?.let { capture ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (!ui.busy) viewModel.dismissCapture()
+            },
+            sheetState = sheetState,
+        ) {
+            CaptureProfileSheet(
+                preview = capture,
+                busy = ui.busy,
+                errorMessage = ui.errorMessage,
+                onNameChange = { viewModel.updateCaptureName(it) },
+                onToggleSlot = { viewModel.toggleCaptureSlot(it) },
+                onConfirm = { viewModel.confirmCapture(setActive = true) },
+                onDismiss = { viewModel.dismissCapture() },
             )
         }
     }
@@ -869,6 +903,106 @@ private fun BusyLabel(busy: Boolean, text: String) {
         }
     } else {
         Text(text)
+    }
+}
+
+/** P3 : sheet capture session → profil + coffre si besoin. */
+@Composable
+private fun CaptureProfileSheet(
+    preview: com.cardrw.app.viewmodel.CapturePreviewUi,
+    busy: Boolean,
+    errorMessage: String?,
+    onNameChange: (String) -> Unit,
+    onToggleSlot: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.card_capture_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(R.string.card_capture_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = preview.suggestedName,
+            onValueChange = onNameChange,
+            label = { Text(stringResource(R.string.card_capture_name)) },
+            singleLine = true,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = stringResource(R.string.card_capture_slots_header),
+            style = MaterialTheme.typography.labelMedium,
+        )
+        preview.slots.forEach { slot ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !busy) { onToggleSlot(slot.selectionKey) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = slot.selected,
+                    onCheckedChange = { onToggleSlot(slot.selectionKey) },
+                    enabled = !busy,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = slot.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text(
+                        text = slot.sourceLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        if (preview.vaultCreatesNeeded > 0) {
+            Text(
+                text = stringResource(
+                    R.string.card_capture_vault_creates,
+                    preview.vaultCreatesNeeded,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        errorMessage?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
+        Button(
+            onClick = onConfirm,
+            enabled = !busy &&
+                preview.suggestedName.isNotBlank() &&
+                preview.slots.any { it.selected },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            BusyLabel(busy = busy, text = stringResource(R.string.card_capture_confirm))
+        }
+        TextButton(
+            onClick = onDismiss,
+            enabled = !busy,
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text(stringResource(R.string.card_auth_cancel))
+        }
     }
 }
 

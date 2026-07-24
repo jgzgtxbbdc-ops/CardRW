@@ -1,9 +1,9 @@
 # Reprise session — CardRW
 
-**Dernière mise à jour :** 2026-07-24 (fin de session — **P2** résolveur moniteur)  
+**Dernière mise à jour :** 2026-07-24 (fin de session — **P3** capture « Enregistrer ce jeu »)  
 **Machine d’arrêt :** session courante  
 **Remote :** `git@github.com:jgzgtxbbdc-ops/CardRW.git` (privé)  
-**Commit :** (voir `git log -1`) — P2 KeyMaterialResolver + profil actif moniteur  
+**Commit :** (voir `git log -1`) — P3 capture session → profil  
 **Branche :** `main` = `origin/main`
 
 ---
@@ -21,7 +21,7 @@
 | **v0.6 UX** moniteur diagnostic écran Carte | ✅ **U0–U5** moniteur v0.6 clos |
 | **NFC reader mode app-wide** | ✅ MainActivity + NfcTagBus (pas de chooser sur Accueil) |
 | **Coffre-fort de clés** | ✅ **K0–K4** — verrou biométrie/PIN optionnel (OFF défaut) |
-| **Profils de clés** (key set multi-slots) | ✅ **P0–P2** [`UX_PROFIL_CLES.md`](UX_PROFIL_CLES.md) — CRUD + résolveur moniteur ; P3 capture suivant |
+| **Profils de clés** (key set multi-slots) | ✅ **P0–P3** [`UX_PROFIL_CLES.md`](UX_PROFIL_CLES.md) — CRUD + résolveur + capture session ; P4 dump suivant |
 | **CI GitHub Actions** | ✅ desfire-core:test + app assembleDebug/testDebug |
 | Décision EV2 avant écritures massives | 🔄 **code + fallback livrés** — campagne parc `docs/ARBITRAGE_EV2.md` |
 | **v1** Write / Create / ChangeKey / dumps | ✅ Write/Create/Delete ; ChangeKey AES+DES→AES ; FormatPICC ; **dumps moniteur** |
@@ -94,8 +94,8 @@
 | **P0** | Spec vocabulaire + modèle + tranches | ✅ |
 | **P1** | `KeyProfile` / `KeyBinding` + repo meta + écran liste/détail CRUD | ✅ |
 | **P2** | `KeyMaterialResolver` moniteur + chip profil actif | ✅ |
-| **P3** | Capture « Enregistrer ce jeu » depuis session | ⬜ **recommandé** |
-| **P4–P5** | Dump / restore avec profil | ⬜ |
+| **P3** | Capture « Enregistrer ce jeu » depuis session | ✅ |
+| **P4–P5** | Dump / restore avec profil | ⬜ **P4 recommandé** |
 | **P6–P7** | Polish chip / export portable + templates | ⬜ (chip basique déjà en P2) |
 
 **P1 livré :**
@@ -111,6 +111,11 @@
 - Auto-auth select / CTA lecture·écriture / fill multi-slots respectent le profil
 - Sheet auth : ☐ « Ajouter ce binding au profil actif »
 - Tests `KeyMaterialResolverTest`
+
+**P3 livré :**
+- `KeyProfileCapture` : plan factory / vault existant / create coffre (dédup matériau)
+- Moniteur : **Enregistrer ce jeu (N slots)** → sheet nom + checkboxes → profil actif
+- Matériaux session non coffre → entrées nommées K4 ; usine → `FactoryZero`
 
 ### Contrat crypto déjà livré (ne pas refaire)
 
@@ -193,7 +198,7 @@ git log -1
 CDC : docs/cahier-des-charges-desfire-ev3.md
 UX Carte : docs/UX_ECRAN_CARTE.md   ← moniteur v0.6
 Coffre : docs/UX_COFFRE_CLES.md     ← noms de clés / SecretStore
-Profils : docs/UX_PROFIL_CLES.md    ← key set multi-slots (P0–P2 ✅)
+Profils : docs/UX_PROFIL_CLES.md    ← key set multi-slots (P0–P3 ✅)
 NOTES : docs/NOTES_LABO.md + docs/REPRISE.md
 
 État : v0 + v0.5 validés terrain ; git privé OK ;
@@ -214,8 +219,8 @@ Hors scope immédiat : refaire v0/crypto livré, biométrie K3 non prioritaire
 - AID / FileNo → suggestions libres (pas de doublon)
 
 Prochaine tâche (une seule par session) :
-  A) Profils P3 — capture « Enregistrer ce jeu » depuis session — recommandé
-  B) Profils P4 — dump complet avec profil
+  A) Profils P4 — dump complet avec profil — recommandé
+  B) Profils P5 — restore/encode avec profil
   C) Templates v1.1 / Value-Records
 Ne pas committer clés prod / dumps réels / local.properties
 ```
@@ -244,23 +249,28 @@ Ne pas committer clés prod / dumps réels / local.properties
 |---|---|
 | **P1** modèle + repo + UI CRUD bindings | P2 résolveur |
 
-### Fin de session 2026-07-24 (P2 — cette fenêtre)
+### Fin de session 2026-07-24 (P2)
 
 | Fait | Suivant |
 |---|---|
-| **P2** `KeyMaterialResolver` + tests | **P3** capture « Enregistrer ce jeu » (recommandé) |
-| **P2** profil actif prefs + chip moniteur + sheet | Terrain multi-clés avec profil Site A |
-| **P2** auto-auth moniteur (select / CTA / fill) via profil | **P4** dump complet avec profil |
-| Sheet auth : lier binding au profil actif | — |
+| **P2** résolveur moniteur + chip | P3 capture |
+
+### Fin de session 2026-07-24 (P3 — cette fenêtre)
+
+| Fait | Suivant |
+|---|---|
+| **P3** `KeyProfileCapture` + tests | **P4** dump complet avec profil |
+| **P3** moniteur « Enregistrer ce jeu » → profil + coffre | Terrain : auth multi → capture → re-pose sans sheet |
+| Profil auto-activé après capture | **P5** restore avec profil |
 
 ---
 
 ## Ordre de bataille recommandé (prochaine fois)
 
-1. **`git pull`** + tests verts + **terrain** : profil Site A + carte non usine → auth sans sheet.  
+1. **`git pull`** + tests verts + **terrain** : auth multi-slots → capture → re-pose carte sans sheet.  
 2. **Une** piste (ne pas tout mélanger) :
-   - **A — Profils P3** : capture depuis `rememberedKeysByAid` → profil + coffre.  
-   - **B — P4** dump complet avec profil (dry-run couverture).  
+   - **A — P4** dump complet avec profil + dry-run couverture.  
+   - **B — P5** restore/encode via résolveur.  
    - **C — Templates / Value** si besoin métier.  
 3. Fin de session : MAJ ce fichier → commit clair → **`git push`**.
 

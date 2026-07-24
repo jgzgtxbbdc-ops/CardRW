@@ -167,6 +167,13 @@
     <string name="card_profile_none_option">Aucun profil (labo usine)</string>
     <string name="card_profile_picker_empty">Aucun profil créé — Accueil → Profils de clés.</string>
     <string name="card_profile_picker_item">%1$s · %2$d binding(s)</string>
+    <string name="card_capture_profile">Enregistrer ce jeu (%1$d slot(s))…</string>
+    <string name="card_capture_title">Enregistrer le jeu de clés</string>
+    <string name="card_capture_hint">Crée un profil depuis les slots déjà authentifiés sur cette pose. Matériaux hors coffre → entrées nommées auto (éditable plus tard). Le profil devient actif.</string>
+    <string name="card_capture_name">Nom du profil</string>
+    <string name="card_capture_slots_header">Slots mémorisés</string>
+    <string name="card_capture_vault_creates">%1$d matériau(x) seront ajoutés au coffre (sans hex dans le profil).</string>
+    <string name="card_capture_confirm">Créer le profil</string>
     <string name="card_auth_keys_show_all">Afficher tous les slots 0–13…</string>
     <string name="card_auth_keys_candidates_only">Slots utiles seulement</string>
     <string name="card_file_auth_to_read">Auth %1$s</string>

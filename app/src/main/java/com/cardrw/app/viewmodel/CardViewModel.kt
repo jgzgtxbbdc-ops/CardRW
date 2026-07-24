@@ -14,6 +14,7 @@ import com.cardrw.app.data.repository.AidNameRepository
 import com.cardrw.app.data.repository.ApduJournalRepository
 import com.cardrw.app.data.repository.DumpRepository
 import com.cardrw.app.data.repository.KeyMaterialResolver
+import com.cardrw.app.data.repository.KeyProfileCapture
 import com.cardrw.app.data.repository.KeyProfileRepository
 import com.cardrw.app.data.repository.KeyVaultRepository
 import com.cardrw.app.nfc.IsoDepTransceiver
@@ -117,6 +118,25 @@ data class CardUiState(
     val activeProfileName: String? = null,
     /** Liste légère pour sheet sélection moniteur. */
     val profileSummaries: List<ProfileSummary> = emptyList(),
+    /** P3 : slots mémorisés session (pour activer « Enregistrer ce jeu »). */
+    val rememberedSlotCount: Int = 0,
+    /** P3 : preview capture ouverte (null = fermé). */
+    val capturePreview: CapturePreviewUi? = null,
+)
+
+/** P3 : ligne de la sheet capture (sans secret). */
+data class CaptureSlotUi(
+    val selectionKey: String,
+    val label: String,
+    val sourceLabel: String,
+    val selected: Boolean,
+)
+
+/** P3 : état sheet « Enregistrer ce jeu ». */
+data class CapturePreviewUi(
+    val suggestedName: String,
+    val slots: List<CaptureSlotUi>,
+    val vaultCreatesNeeded: Int,
 )
 
 /** Entrée liste sélection profil moniteur (P2). */
@@ -202,6 +222,13 @@ class CardViewModel @Inject constructor(
     /** Matériau en attente d’enregistrement coffre après auth KO (wipe sur dismiss / create). */
     private var pendingVaultKeyBytes: ByteArray? = null
 
+    /**
+     * P3 : plan de capture en cours (matériaux encore en RAM jusqu’à confirm / dismiss).
+     * Ne pas exposer les octets dans [CardUiState].
+     */
+    private var captureSessionSlots: List<KeyProfileCapture.SessionSlot> = emptyList()
+    private var capturePlanned: List<KeyProfileCapture.PlannedSlot> = emptyList()
+
     init {
         viewModelScope.launch {
             keyVault.load()
@@ -262,6 +289,194 @@ class CardViewModel @Inject constructor(
             keyProfiles.load()
             publishProfileUi()
         }
+    }
+
+    private fun publishRememberedCount() {
+        val n = rememberedKeysByAid.values.sumOf { it.size }
+        _ui.update { it.copy(rememberedSlotCount = n) }
+    }
+
+    /**
+     * P3 : ouvre la preview « Enregistrer ce jeu » depuis [rememberedKeysByAid].
+     */
+    fun openCaptureFromSession() {
+        val slots = snapshotRememberedSlots()
+        if (slots.isEmpty()) {
+            _ui.update {
+                it.copy(errorMessage = "Aucun slot mémorisé — authentifie d’abord sur la carte.")
+            }
+            return
+        }
+        viewModelScope.launch {
+            keyVault.load()
+            keyProfiles.load()
+            val knownVaultIds = keyVault.entries.value.map { it.id }.toSet()
+            val vaultNames = keyVault.entries.value.map { it.displayName }
+            val planned = KeyProfileCapture.plan(slots, knownVaultIds, vaultNames)
+            val suggested = KeyProfileCapture.suggestProfileName(
+                slots,
+                keyProfiles.profiles.value.map { it.displayName },
+            )
+            // wipe previous capture buffers
+            wipeCaptureBuffers()
+            captureSessionSlots = slots
+            capturePlanned = planned
+            val selectedKeys = planned.map { it.selectionKey }.toSet()
+            _ui.update {
+                it.copy(
+                    capturePreview = CapturePreviewUi(
+                        suggestedName = suggested,
+                        slots = planned.map { p ->
+                            CaptureSlotUi(
+                                selectionKey = p.selectionKey,
+                                label = p.label,
+                                sourceLabel = p.sourceLabel,
+                                selected = true,
+                            )
+                        },
+                        vaultCreatesNeeded = KeyProfileCapture.countNeedingVaultCreate(
+                            planned,
+                            selectedKeys,
+                        ),
+                    ),
+                    errorMessage = null,
+                )
+            }
+        }
+    }
+
+    fun toggleCaptureSlot(selectionKey: String) {
+        val preview = _ui.value.capturePreview ?: return
+        val slots = preview.slots.map {
+            if (it.selectionKey == selectionKey) it.copy(selected = !it.selected) else it
+        }
+        val selectedKeys = slots.filter { it.selected }.map { it.selectionKey }.toSet()
+        _ui.update {
+            it.copy(
+                capturePreview = preview.copy(
+                    slots = slots,
+                    vaultCreatesNeeded = KeyProfileCapture.countNeedingVaultCreate(
+                        capturePlanned,
+                        selectedKeys,
+                    ),
+                ),
+            )
+        }
+    }
+
+    fun updateCaptureName(name: String) {
+        val preview = _ui.value.capturePreview ?: return
+        _ui.update { it.copy(capturePreview = preview.copy(suggestedName = name)) }
+    }
+
+    fun dismissCapture() {
+        wipeCaptureBuffers()
+        _ui.update { it.copy(capturePreview = null) }
+    }
+
+    /**
+     * P3 : crée les entrées coffre manquantes + le profil, active le profil.
+     */
+    fun confirmCapture(setActive: Boolean = true) {
+        val preview = _ui.value.capturePreview ?: return
+        val name = preview.suggestedName.trim()
+        val selectedKeys = preview.slots.filter { it.selected }.map { it.selectionKey }.toSet()
+        if (selectedKeys.isEmpty()) {
+            _ui.update { it.copy(errorMessage = "Coche au moins un slot.") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, errorMessage = null, statusLine = "Capture profil…") }
+            try {
+                // fingerprint → keyBytes (depuis snapshot session)
+                val bytesByFp = linkedMapOf<String, ByteArray>()
+                for (s in captureSessionSlots) {
+                    if (s.isFactoryZero) continue
+                    val fp = s.materialFingerprint
+                    if (fp !in bytesByFp) bytesByFp[fp] = s.keyBytes.copyOf()
+                }
+
+                val vaultIdByFp = mutableMapOf<String, String>()
+                // Dédup CreateVault : un vault par fingerprint coché
+                val creates = capturePlanned
+                    .filter { it.selectionKey in selectedKeys }
+                    .mapNotNull { it.plan as? KeyProfileCapture.MaterialPlan.CreateVault }
+                    .distinctBy { it.fingerprint }
+
+                for (create in creates) {
+                    val bytes = bytesByFp[create.fingerprint]
+                        ?: error("matériau manquant pour ${create.suggestedName}")
+                    val id = keyVault.create(create.suggestedName, bytes)
+                    vaultIdByFp[create.fingerprint] = id
+                }
+
+                val bindings = KeyProfileCapture.toBindings(
+                    planned = capturePlanned,
+                    selectedKeys = selectedKeys,
+                    vaultIdByFingerprint = vaultIdByFp,
+                )
+                val profileId = keyProfiles.create(
+                    displayName = name.ifBlank {
+                        KeyProfileCapture.suggestProfileName(
+                            captureSessionSlots,
+                            keyProfiles.profiles.value.map { it.displayName },
+                        )
+                    },
+                    notes = "Capturé depuis session moniteur",
+                    allowFactoryFallback = true,
+                    bindings = bindings,
+                )
+                if (setActive) {
+                    keyProfiles.setActiveProfileId(profileId)
+                }
+                wipeCaptureBuffers()
+                publishProfileUi()
+                val vaultNote = if (creates.isEmpty()) {
+                    ""
+                } else {
+                    " · ${creates.size} entrée(s) coffre créée(s)"
+                }
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        capturePreview = null,
+                        statusLine = "Profil « $name » créé (${bindings.size} binding(s))$vaultNote",
+                        errorMessage = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        errorMessage = "Capture : ${e.message}",
+                        statusLine = null,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun snapshotRememberedSlots(): List<KeyProfileCapture.SessionSlot> {
+        val out = mutableListOf<KeyProfileCapture.SessionSlot>()
+        for ((aid, map) in rememberedKeysByAid) {
+            for ((_, auth) in map) {
+                out += KeyProfileCapture.SessionSlot(
+                    aidHex = aid,
+                    keyNo = auth.keyNo,
+                    vaultEntryId = auth.vaultEntryId,
+                    keyBytes = auth.copyMaterial(),
+                )
+            }
+        }
+        return out
+    }
+
+    private fun wipeCaptureBuffers() {
+        for (s in captureSessionSlots) {
+            s.keyBytes.fill(0)
+        }
+        captureSessionSlots = emptyList()
+        capturePlanned = emptyList()
     }
 
     private fun activeProfileOrNull(): KeyProfile? = keyProfiles.activeProfile()
@@ -1219,6 +1434,7 @@ class CardViewModel @Inject constructor(
                 keyHex = Hex.encode(keyBytes),
             )
         }
+        publishRememberedCount()
     }
 
     private fun hasRememberedKeys(aidHex: String): Boolean =
@@ -1245,6 +1461,7 @@ class CardViewModel @Inject constructor(
         } else if (lastKeyNoByAid[aidKey] == keyNo) {
             lastKeyNoByAid[aidKey] = map.keys.first()
         }
+        publishRememberedCount()
     }
 
     private fun clearRememberedAuth() {
@@ -1257,6 +1474,7 @@ class CardViewModel @Inject constructor(
         factoryFailedSlotsByAid.clear()
         profileFailedSlotsByAid.clear()
         clearPendingVaultSave(wipeMaterial = true)
+        publishRememberedCount()
     }
 
     /**
@@ -2766,6 +2984,7 @@ class CardViewModel @Inject constructor(
                             lastKeyNoByAid.remove(aid)
                             factoryFailedSlotsByAid.remove(aid)
                         }
+                    publishRememberedCount()
                     _ui.update {
                         it.copy(
                             authSession = null,
@@ -2802,6 +3021,7 @@ class CardViewModel @Inject constructor(
                         it.keyBytes.fill(0)
                     }
                     lastKeyNoByAid.remove(aidHex.uppercase())
+                    publishRememberedCount()
                     _ui.update {
                         it.copy(
                             statusLine = "DeleteApplication OK — $aidHex",
