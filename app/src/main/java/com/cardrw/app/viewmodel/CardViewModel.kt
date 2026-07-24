@@ -5,10 +5,16 @@ import android.nfc.tech.IsoDep
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cardrw.app.BuildConfig
+import com.cardrw.app.data.model.BindingScope
+import com.cardrw.app.data.model.KeyBinding
+import com.cardrw.app.data.model.KeyProfile
 import com.cardrw.app.data.model.KeyVaultEntryMeta
+import com.cardrw.app.data.model.MaterialRef
 import com.cardrw.app.data.repository.AidNameRepository
 import com.cardrw.app.data.repository.ApduJournalRepository
 import com.cardrw.app.data.repository.DumpRepository
+import com.cardrw.app.data.repository.KeyMaterialResolver
+import com.cardrw.app.data.repository.KeyProfileRepository
 import com.cardrw.app.data.repository.KeyVaultRepository
 import com.cardrw.app.nfc.IsoDepTransceiver
 import com.cardrw.app.nfc.NfcReaderController
@@ -106,6 +112,18 @@ data class CardUiState(
      * (ex. bon secret, mauvais slot carte). Non null → dialog UI.
      */
     val pendingVaultSave: PendingVaultSaveOffer? = null,
+    /** P2 : profil actif (null = moniteur labo sans profil). */
+    val activeProfileId: String? = null,
+    val activeProfileName: String? = null,
+    /** Liste légère pour sheet sélection moniteur. */
+    val profileSummaries: List<ProfileSummary> = emptyList(),
+)
+
+/** Entrée liste sélection profil moniteur (P2). */
+data class ProfileSummary(
+    val id: String,
+    val displayName: String,
+    val bindingCount: Int,
 )
 
 /**
@@ -143,6 +161,7 @@ class CardViewModel @Inject constructor(
     private val journalRepository: ApduJournalRepository,
     private val aidNames: AidNameRepository,
     private val keyVault: KeyVaultRepository,
+    private val keyProfiles: KeyProfileRepository,
     private val dumpRepository: DumpRepository,
     private val tagBus: NfcTagBus,
 ) : ViewModel() {
@@ -174,11 +193,27 @@ class CardViewModel @Inject constructor(
      */
     private val factoryFailedSlotsByAid = mutableMapOf<String, MutableSet<Int>>()
 
+    /**
+     * Slots déjà tentés via **profil** et refusés (mauvais matériau / 0xAE)
+     * — évite de reboucler sur le même binding cassé.
+     */
+    private val profileFailedSlotsByAid = mutableMapOf<String, MutableSet<Int>>()
+
     /** Matériau en attente d’enregistrement coffre après auth KO (wipe sur dismiss / create). */
     private var pendingVaultKeyBytes: ByteArray? = null
 
     init {
-        viewModelScope.launch { keyVault.load() }
+        viewModelScope.launch {
+            keyVault.load()
+            keyProfiles.load()
+            publishProfileUi()
+        }
+        viewModelScope.launch {
+            keyProfiles.profiles.collect { publishProfileUi() }
+        }
+        viewModelScope.launch {
+            keyProfiles.activeProfileId.collect { publishProfileUi() }
+        }
         // Tags via MainActivity reader mode + NfcTagBus (pending si navigation depuis Accueil)
         viewModelScope.launch {
             tagBus.consumePending()?.let { handleIncomingTag(it) }
@@ -188,6 +223,48 @@ class CardViewModel @Inject constructor(
             }
         }
     }
+
+    private fun publishProfileUi() {
+        val profiles = keyProfiles.profiles.value
+        val activeId = keyProfiles.activeProfileId.value
+        val active = profiles.find { it.id == activeId }
+        _ui.update {
+            it.copy(
+                activeProfileId = active?.id,
+                activeProfileName = active?.displayName,
+                profileSummaries = profiles.map { p ->
+                    ProfileSummary(p.id, p.displayName, p.bindings.size)
+                },
+            )
+        }
+    }
+
+    /** P2 : activer / désactiver le profil pour le moniteur (global session + prefs). */
+    fun setActiveProfile(profileId: String?) {
+        keyProfiles.setActiveProfileId(profileId)
+        // Nouveaux bindings : réautoriser les retries profil
+        profileFailedSlotsByAid.clear()
+        publishProfileUi()
+        val name = keyProfiles.activeProfile()?.displayName
+        _ui.update {
+            it.copy(
+                statusLine = if (name != null) {
+                    "Profil actif : $name"
+                } else {
+                    "Aucun profil — moniteur labo (usine + mémorisée)"
+                },
+            )
+        }
+    }
+
+    fun reloadProfiles() {
+        viewModelScope.launch {
+            keyProfiles.load()
+            publishProfileUi()
+        }
+    }
+
+    private fun activeProfileOrNull(): KeyProfile? = keyProfiles.activeProfile()
 
     private fun handleIncomingTag(tag: Tag) {
         if (NfcReaderController.isIsoDep(tag)) {
@@ -411,7 +488,7 @@ class CardViewModel @Inject constructor(
 
     /**
      * Auth auto pour un [AuthKeyPlan] d’intention (Read / Write / Structure) :
-     * mémorisée sur slots candidats (prefer d’abord), puis usine sur ces slots.
+     * mémorisée → **profil** → usine (si autorisée) sur slots candidats.
      */
     private suspend fun autoAuthForPlan(
         aidHex: String,
@@ -444,9 +521,35 @@ class CardViewModel @Inject constructor(
             if (ok) return true
         }
 
+        // P2 : bindings profil sur candidats
+        for (keyNo in candidateNos) {
+            val role = plan.candidates.find { it.keyNo == keyNo }?.roleLabel
+            val ok = tryProfileSlotAuthThenExplore(
+                aidHex = aidHex,
+                keyNo = keyNo,
+                roleLabel = role,
+                intentLabel = intentLabel,
+                fillAfter = true,
+            )
+            if (ok) return true
+        }
+
+        if (!KeyMaterialResolver.allowsFactoryFallback(activeProfileOrNull())) {
+            return false
+        }
         val failedFactory = factoryFailedSlotsByAid[aidKey].orEmpty()
         for (keyNo in candidateNos) {
             if (keyNo in failedFactory) continue
+            // Si binding profil existe (même KO), ne pas masquer avec usine sauf fallback
+            val profile = activeProfileOrNull()
+            if (profile != null) {
+                val scope = KeyMaterialResolver.scopeForAid(aidHex)
+                val binding = KeyMaterialResolver.findBinding(profile, scope, keyNo)
+                if (binding != null && binding.materialRef !is MaterialRef.FactoryZero) {
+                    // Binding non-usine : déjà tenté en phase profil
+                    continue
+                }
+            }
             val role = plan.candidates.find { it.keyNo == keyNo }?.roleLabel
             val ok = tryFactoryAuthThenExplore(
                 aidHex = aidHex,
@@ -591,7 +694,7 @@ class CardViewModel @Inject constructor(
     }
 
     /**
-     * Auth auto post-select : mémorisée ↔ usine (ordre selon [preferFactoryFirst]).
+     * Auth auto post-select : mémorisée → **profil** → usine (ordre selon [preferFactoryFirst]).
      * Flash pédagogique avec scope + clé + droits.
      */
     private suspend fun autoAuthThenExplore(
@@ -599,7 +702,8 @@ class CardViewModel @Inject constructor(
         preferFactoryFirst: Boolean = false,
     ) {
         if (preferFactoryFirst) {
-            if (tryFactoryAuthThenExplore(
+            if (KeyMaterialResolver.allowsFactoryFallback(activeProfileOrNull()) &&
+                tryFactoryAuthThenExplore(
                     aidHex = aidHex,
                     keyNo = DEFAULT_AUTH_KEY_NO,
                     flashMessage = authFlashMessage(aidHex, DEFAULT_AUTH_KEY_NO, "usine"),
@@ -609,12 +713,15 @@ class CardViewModel @Inject constructor(
                 return
             }
             if (tryRememberedAuthThenExplore(aidHex)) return
+            if (tryProfileAuthThenExplore(aidHex)) return
             openAuthSheetAfterAutoFail(aidHex)
             runExplore(aidHex, fillRemembered = false)
             return
         }
         if (tryRememberedAuthThenExplore(aidHex)) return
-        if (tryFactoryAuthThenExplore(
+        if (tryProfileAuthThenExplore(aidHex)) return
+        if (KeyMaterialResolver.allowsFactoryFallback(activeProfileOrNull()) &&
+            tryFactoryAuthThenExplore(
                 aidHex = aidHex,
                 keyNo = DEFAULT_AUTH_KEY_NO,
                 flashMessage = authFlashMessage(aidHex, DEFAULT_AUTH_KEY_NO, "usine"),
@@ -633,6 +740,86 @@ class CardViewModel @Inject constructor(
         } == true
         if (freeListBlocked && !aidHex.equals("000000", ignoreCase = true)) {
             openAuthSheetAfterAutoFail(aidHex)
+        }
+    }
+
+    /**
+     * P2 : tente les bindings du profil actif pour cet AID (k0 d’abord, puis autres).
+     * Succès → explore + fill (mémorisées + autres slots profil).
+     */
+    private suspend fun tryProfileAuthThenExplore(aidHex: String): Boolean {
+        val profile = activeProfileOrNull() ?: return false
+        val scope = KeyMaterialResolver.scopeForAid(aidHex)
+        val bindings = KeyMaterialResolver.bindingsForScope(profile, scope)
+        if (bindings.isEmpty()) return false
+
+        for (binding in bindings) {
+            val ok = tryProfileSlotAuthThenExplore(
+                aidHex = aidHex,
+                keyNo = binding.keyNo,
+                roleLabel = binding.roleHint,
+                intentLabel = null,
+                fillAfter = true,
+            )
+            if (ok) return true
+        }
+        return false
+    }
+
+    /**
+     * Auth un slot via binding profil (si présent et pas déjà en échec session).
+     */
+    private suspend fun tryProfileSlotAuthThenExplore(
+        aidHex: String,
+        keyNo: Int,
+        roleLabel: String?,
+        intentLabel: String?,
+        fillAfter: Boolean,
+    ): Boolean {
+        val profile = activeProfileOrNull() ?: return false
+        val aidKey = aidHex.uppercase()
+        if (keyNo in profileFailedSlotsByAid[aidKey].orEmpty()) return false
+        // Déjà mémorisé : laisser la phase remembered
+        if (rememberedKeysByAid[aidKey]?.containsKey(keyNo) == true) return false
+
+        val scope = KeyMaterialResolver.scopeForAid(aidHex)
+        val binding = KeyMaterialResolver.findBinding(profile, scope, keyNo) ?: return false
+        val knownVaultIds = keyVault.entries.value.map { it.id }.toSet()
+        val resolved = KeyMaterialResolver.resolveBinding(
+            binding = binding,
+            knownVaultIds = knownVaultIds,
+            loadVault = { id -> keyVault.material(id) },
+        )
+        return when (resolved) {
+            is KeyMaterialResolver.ResolveResult.Ready -> {
+                val ok = tryMaterialAuthThenExplore(
+                    aidHex = aidHex,
+                    keyNo = keyNo,
+                    keyBytes = resolved.keyBytes,
+                    vaultEntryId = resolved.vaultEntryId,
+                    flashMessage = authFlashMessage(
+                        aidHex = aidHex,
+                        keyNo = keyNo,
+                        source = KeyMaterialResolver.sourceLabel(resolved.source),
+                        roleLabel = roleLabel ?: binding.roleHint,
+                        intentLabel = intentLabel,
+                    ),
+                    fillAfter = fillAfter,
+                )
+                if (ok) {
+                    profileFailedSlotsByAid[aidKey]?.remove(keyNo)
+                    runCatching { keyProfiles.touchActiveIfAny() }
+                } else {
+                    profileFailedSlotsByAid.getOrPut(aidKey) { mutableSetOf() }.add(keyNo)
+                }
+                ok
+            }
+            is KeyMaterialResolver.ResolveResult.NeedsUser,
+            is KeyMaterialResolver.ResolveResult.Impossible,
+            -> {
+                profileFailedSlotsByAid.getOrPut(aidKey) { mutableSetOf() }.add(keyNo)
+                false
+            }
         }
     }
 
@@ -1068,17 +1255,50 @@ class CardViewModel @Inject constructor(
         rememberedKeysByAid.clear()
         lastKeyNoByAid.clear()
         factoryFailedSlotsByAid.clear()
+        profileFailedSlotsByAid.clear()
         clearPendingVaultSave(wipeMaterial = true)
     }
 
     /**
      * Après explore : complète les lectures manquantes avec
      * 1) clés **mémorisées** (déjà validées sur cette session)
-     * 2) **clé standard usine** 00…00 sur les slots candidats (R/RW + maître 0 structure)
+     * 2) **bindings profil** (P2)
+     * 3) **clé standard usine** 00…00 si autorisée (labo / fallback profil)
      */
     private suspend fun fillUnreadWithRememberedKeys(aidHex: String) {
         fillWithRememberedMaterials(aidHex)
-        fillWithFactoryKey(aidHex)
+        fillWithProfileMaterials(aidHex)
+        if (KeyMaterialResolver.allowsFactoryFallback(activeProfileOrNull())) {
+            fillWithFactoryKey(aidHex)
+        }
+    }
+
+    /** Phase profil : slots encore non mémorisés mais liés dans le profil actif. */
+    private suspend fun fillWithProfileMaterials(aidHex: String) {
+        val profile = activeProfileOrNull() ?: return
+        val scope = KeyMaterialResolver.scopeForAid(aidHex)
+        val bindings = KeyMaterialResolver.bindingsForScope(profile, scope)
+        if (bindings.isEmpty()) return
+
+        var guard = 0
+        while (guard++ < 8) {
+            val nextKeyNo = nextSlotNeedingAuth(
+                aidHex,
+                preferKnown = bindings.map { it.keyNo }.toSet(),
+            ) ?: break
+            val ok = tryProfileSlotAuthThenExplore(
+                aidHex = aidHex,
+                keyNo = nextKeyNo,
+                roleLabel = bindings.find { it.keyNo == nextKeyNo }?.roleHint,
+                intentLabel = null,
+                fillAfter = false,
+            )
+            if (!ok) {
+                // Ne pas boucler indéfiniment sur le même slot
+                profileFailedSlotsByAid.getOrPut(aidHex.uppercase()) { mutableSetOf() }
+                    .add(nextKeyNo)
+            }
+        }
     }
 
     /** Phase 1 : rejouer les matériaux déjà OK (multi-slots). */
@@ -1235,13 +1455,40 @@ class CardViewModel @Inject constructor(
         fillAfter: Boolean,
     ): Boolean {
         val keyBytes = AesConstants.FACTORY_KEY.copyOf()
+        val ok = tryMaterialAuthThenExplore(
+            aidHex = aidHex,
+            keyNo = keyNo,
+            keyBytes = keyBytes,
+            vaultEntryId = null,
+            flashMessage = flashMessage,
+            fillAfter = fillAfter,
+            statusLine = "Auth auto clé standard (n°$keyNo)…",
+        )
+        if (ok) {
+            factoryFailedSlotsByAid[aidHex.uppercase()]?.remove(keyNo)
+        }
+        return ok
+    }
+
+    /**
+     * AuthenticateAES avec un matériau déjà résolu (profil / usine / …), puis explore.
+     */
+    private suspend fun tryMaterialAuthThenExplore(
+        aidHex: String,
+        keyNo: Int,
+        keyBytes: ByteArray,
+        vaultEntryId: String?,
+        flashMessage: String?,
+        fillAfter: Boolean,
+        statusLine: String = "Auth auto (n°$keyNo)…",
+    ): Boolean {
         _ui.update {
             it.copy(
                 keyNo = keyNo,
                 keyHex = Hex.encode(keyBytes),
                 busy = true,
                 errorMessage = null,
-                statusLine = "Auth auto clé standard (n°$keyNo)…",
+                statusLine = statusLine,
             )
         }
         val result = withContext(Dispatchers.IO) {
@@ -1253,9 +1500,7 @@ class CardViewModel @Inject constructor(
         }
         return result.fold(
             onSuccess = { session ->
-                rememberAuth(aidHex, keyNo, keyBytes, vaultEntryId = null)
-                // Succès usine : retirer d’éventuels échecs antérieurs sur ce slot
-                factoryFailedSlotsByAid[aidHex.uppercase()]?.remove(keyNo)
+                rememberAuth(aidHex, keyNo, keyBytes, vaultEntryId = vaultEntryId)
                 _ui.update {
                     it.copy(
                         authSession = session,
@@ -1269,7 +1514,6 @@ class CardViewModel @Inject constructor(
                 true
             },
             onFailure = {
-                // authenticate* clear la session client dès le début
                 syncJournal()
                 _ui.update { it.copy(busy = false, authSession = null) }
                 false
@@ -1326,12 +1570,14 @@ class CardViewModel @Inject constructor(
      *
      * Matériau : [keyHex] **ou** [vaultEntryId] (coffre K2).  
      * Si [saveAsVaultName] non null et auth OK → enregistre le matériau saisi dans le coffre.
+     * Si [bindToActiveProfile] et profil actif → upsert binding (scope courant, keyNo → vault/usine).
      */
     fun authenticate(
         keyNo: Int? = null,
         keyHex: String? = null,
         vaultEntryId: String? = null,
         saveAsVaultName: String? = null,
+        bindToActiveProfile: Boolean = false,
     ) {
         if (keyNo != null) {
             _ui.update { it.copy(keyNo = keyNo.coerceIn(0, 13)) }
@@ -1393,6 +1639,17 @@ class CardViewModel @Inject constructor(
                     }
                     // Mémoriser ce slot (multi-clés par AID) pour re-select / fill auto
                     rememberAuth(aidHex, resolvedKeyNo, keyBytes, resolvedVaultId)
+                    if (bindToActiveProfile) {
+                        val bindNote = bindAuthToActiveProfile(
+                            aidHex = aidHex,
+                            keyNo = resolvedKeyNo,
+                            vaultEntryId = resolvedVaultId,
+                            keyBytes = keyBytes,
+                        )
+                        if (bindNote != null) {
+                            vaultNote = listOfNotNull(vaultNote, bindNote).joinToString(" · ")
+                        }
+                    }
                     _ui.update {
                         it.copy(
                             authSession = session,
@@ -1420,6 +1677,53 @@ class CardViewModel @Inject constructor(
                     }
                 },
             )
+        }
+    }
+
+    /**
+     * P2 : après auth manuelle OK, lie le slot au profil actif
+     * (VaultEntry si coffre, sinon FactoryZero si matériau usine).
+     */
+    private suspend fun bindAuthToActiveProfile(
+        aidHex: String,
+        keyNo: Int,
+        vaultEntryId: String?,
+        keyBytes: ByteArray,
+    ): String? {
+        val profile = activeProfileOrNull() ?: return "pas de profil actif pour lier"
+        val scope = KeyMaterialResolver.scopeForAid(aidHex)
+        val material = when {
+            vaultEntryId != null -> MaterialRef.VaultEntry(vaultEntryId)
+            keyBytes.all { it == 0.toByte() } -> MaterialRef.FactoryZero
+            else -> {
+                // Hex libre : créer une entrée coffre pour ne pas dupliquer le secret dans le profil
+                return try {
+                    val name = keyVault.suggestContextName(
+                        aidHex = aidHex,
+                        keyNo = keyNo,
+                        roleHint = null,
+                    )
+                    val id = keyVault.create(name, keyBytes)
+                    keyProfiles.upsertBinding(
+                        profile.id,
+                        KeyBinding(scope, keyNo, MaterialRef.VaultEntry(id)),
+                    )
+                    profileFailedSlotsByAid[aidHex.uppercase()]?.remove(keyNo)
+                    "lié au profil « ${profile.displayName} » → $name"
+                } catch (e: Exception) {
+                    "liaison profil : ${e.message}"
+                }
+            }
+        }
+        return try {
+            keyProfiles.upsertBinding(
+                profile.id,
+                KeyBinding(scope, keyNo, material),
+            )
+            profileFailedSlotsByAid[aidHex.uppercase()]?.remove(keyNo)
+            "lié au profil « ${profile.displayName} »"
+        } catch (e: Exception) {
+            "liaison profil : ${e.message}"
         }
     }
 

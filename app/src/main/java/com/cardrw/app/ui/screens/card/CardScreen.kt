@@ -195,6 +195,7 @@ private fun ReadyMonitor(
     val authenticated = ui.authSession?.authenticated == true
     val vaultEntries by viewModel.vaultEntries.collectAsStateWithLifecycle()
     var showAuthSheet by rememberSaveable { mutableStateOf(false) }
+    var showProfilePicker by remember { mutableStateOf(false) }
     var authPlan by remember { mutableStateOf<AuthKeyPlan?>(null) }
     var neverMessage by remember { mutableStateOf<String?>(null) }
     var closeSheetWhenAuthSettles by remember { mutableStateOf(false) }
@@ -331,6 +332,14 @@ private fun ReadyMonitor(
                 onOpenAuth = {
                     // Barre session : plan contextuel, sinon générique (changer de clé)
                     openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
+                },
+            )
+            ActiveProfileChip(
+                profileName = ui.activeProfileName,
+                busy = ui.busy,
+                onClick = {
+                    viewModel.reloadProfiles()
+                    showProfilePicker = true
                 },
             )
             AuthSuccessFlash(
@@ -539,6 +548,7 @@ private fun ReadyMonitor(
                 suggestSaveName = { keyNo, role ->
                     viewModel.suggestVaultSaveName(keyNo, role)
                 },
+                activeProfileName = ui.activeProfileName,
                 busy = ui.busy,
                 authenticated = authenticated,
                 selectedAid = ui.selectedAidHex,
@@ -556,8 +566,27 @@ private fun ReadyMonitor(
                         keyHex = request.keyHex,
                         vaultEntryId = request.vaultEntryId,
                         saveAsVaultName = request.saveAsVaultName,
+                        bindToActiveProfile = request.bindToActiveProfile,
                     )
                 },
+            )
+        }
+    }
+
+    if (showProfilePicker) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showProfilePicker = false },
+            sheetState = sheetState,
+        ) {
+            ProfilePickerSheet(
+                profiles = ui.profileSummaries,
+                activeProfileId = ui.activeProfileId,
+                onSelect = { id ->
+                    viewModel.setActiveProfile(id)
+                    showProfilePicker = false
+                },
+                onDismiss = { showProfilePicker = false },
             )
         }
     }
@@ -824,6 +853,8 @@ private data class AuthMaterialRequest(
     val keyHex: String? = null,
     val vaultEntryId: String? = null,
     val saveAsVaultName: String? = null,
+    /** P2 : upsert binding sur le profil actif après auth OK. */
+    val bindToActiveProfile: Boolean = false,
 )
 
 @Composable
@@ -838,6 +869,105 @@ private fun BusyLabel(busy: Boolean, text: String) {
         }
     } else {
         Text(text)
+    }
+}
+
+/** P2 : chip profil actif sous la barre session. */
+@Composable
+private fun ActiveProfileChip(
+    profileName: String?,
+    busy: Boolean,
+    onClick: () -> Unit,
+) {
+    val label = if (profileName != null) {
+        stringResource(R.string.card_profile_active, profileName)
+    } else {
+        stringResource(R.string.card_profile_none)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            .clickable(enabled = !busy, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (profileName != null) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        Text(
+            text = stringResource(R.string.card_profile_change),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@Composable
+private fun ProfilePickerSheet(
+    profiles: List<com.cardrw.app.viewmodel.ProfileSummary>,
+    activeProfileId: String?,
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.card_profile_picker_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = stringResource(R.string.card_profile_picker_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FilterChip(
+            selected = activeProfileId == null,
+            onClick = { onSelect(null) },
+            label = { Text(stringResource(R.string.card_profile_none_option)) },
+        )
+        if (profiles.isEmpty()) {
+            Text(
+                text = stringResource(R.string.card_profile_picker_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            profiles.forEach { p ->
+                FilterChip(
+                    selected = p.id == activeProfileId,
+                    onClick = { onSelect(p.id) },
+                    label = {
+                        Text(
+                            stringResource(
+                                R.string.card_profile_picker_item,
+                                p.displayName,
+                                p.bindingCount,
+                            ),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+            Text(stringResource(R.string.card_auth_cancel))
+        }
     }
 }
 
@@ -956,6 +1086,8 @@ private fun AuthSheetContent(
     vaultEntries: List<KeyVaultEntryMeta>,
     /** K4 : suggestion nom coffre (AID · kN · rôle). */
     suggestSaveName: (keyNo: Int, roleHint: String?) -> String,
+    /** P2 : nom du profil actif (null = pas de profil). */
+    activeProfileName: String?,
     busy: Boolean,
     authenticated: Boolean,
     selectedAid: String?,
@@ -980,6 +1112,7 @@ private fun AuthSheetContent(
         mutableStateOf(suggestSaveName(preferred, role))
     }
     var saveNameTouched by remember { mutableStateOf(false) }
+    var bindToProfile by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     var showAllKeys by remember(authPlan) {
         mutableStateOf(authPlan.candidates.isEmpty())
@@ -1247,11 +1380,29 @@ private fun AuthSheetContent(
             }
         }
 
+        if (activeProfileName != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = bindToProfile,
+                    onCheckedChange = { bindToProfile = it },
+                    enabled = !busy,
+                )
+                Text(
+                    text = stringResource(R.string.card_auth_bind_profile, activeProfileName),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
         fun submit() {
             if (useVault) {
                 val id = selectedVaultId ?: return
                 onAuthenticate(
-                    AuthMaterialRequest(keyNo = draftKeyNo, vaultEntryId = id),
+                    AuthMaterialRequest(
+                        keyNo = draftKeyNo,
+                        vaultEntryId = id,
+                        bindToActiveProfile = bindToProfile && activeProfileName != null,
+                    ),
                 )
             } else {
                 if (draftKeyHex.length != 32) return
@@ -1260,6 +1411,7 @@ private fun AuthSheetContent(
                         keyNo = draftKeyNo,
                         keyHex = draftKeyHex,
                         saveAsVaultName = saveName.trim().takeIf { saveToVault && it.isNotEmpty() },
+                        bindToActiveProfile = bindToProfile && activeProfileName != null,
                     ),
                 )
             }

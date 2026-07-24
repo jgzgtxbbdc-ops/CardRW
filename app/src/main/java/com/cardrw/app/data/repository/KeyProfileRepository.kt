@@ -23,6 +23,9 @@ import javax.inject.Singleton
  * Profils de clés : métadonnées JSON (clair), références [vaultId] uniquement.
  * Même esprit que [KeyVaultRepository] meta — jamais de copie des 16 octets.
  * Spec : [docs/UX_PROFIL_CLES.md] §4.3, P1.
+ *
+ * Profil **actif** (P2) : id en SharedPreferences — moniteur / dump le consultent
+ * via [activeProfile] sans re-sélection à chaque pose.
  */
 @Singleton
 class KeyProfileRepository @Inject constructor(
@@ -32,13 +35,45 @@ class KeyProfileRepository @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val metaFile: File
         get() = File(context.filesDir, META_FILE)
+    private val prefs
+        get() = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _profiles = MutableStateFlow<List<KeyProfile>>(emptyList())
     val profiles: StateFlow<List<KeyProfile>> = _profiles.asStateFlow()
 
+    private val _activeProfileId = MutableStateFlow(prefs.getString(KEY_ACTIVE_ID, null))
+    val activeProfileId: StateFlow<String?> = _activeProfileId.asStateFlow()
+
+    /** Profil actif courant (null = moniteur labo sans profil). */
+    fun activeProfile(): KeyProfile? {
+        val id = _activeProfileId.value ?: return null
+        return _profiles.value.find { it.id == id }
+    }
+
+    fun setActiveProfileId(id: String?) {
+        if (id != null && _profiles.value.none { it.id == id }) {
+            // id inconnu : clear plutôt que pointer dans le vide
+            prefs.edit().remove(KEY_ACTIVE_ID).apply()
+            _activeProfileId.value = null
+            return
+        }
+        if (id == null) {
+            prefs.edit().remove(KEY_ACTIVE_ID).apply()
+        } else {
+            prefs.edit().putString(KEY_ACTIVE_ID, id).apply()
+        }
+        _activeProfileId.value = id
+    }
+
     suspend fun load() {
         mutex.withLock {
             _profiles.value = withContext(Dispatchers.IO) { readSortedUnlocked() }
+            // Si profil actif supprimé hors session → clear
+            val active = _activeProfileId.value
+            if (active != null && _profiles.value.none { it.id == active }) {
+                prefs.edit().remove(KEY_ACTIVE_ID).apply()
+                _activeProfileId.value = null
+            }
         }
     }
 
@@ -166,6 +201,16 @@ class KeyProfileRepository @Inject constructor(
         val remaining = withContext(Dispatchers.IO) { readUnlocked() }.filterNot { it.id == id }
         withContext(Dispatchers.IO) { writeUnlocked(remaining) }
         _profiles.value = withContext(Dispatchers.IO) { readSortedUnlocked() }
+        if (_activeProfileId.value == id) {
+            prefs.edit().remove(KEY_ACTIVE_ID).apply()
+            _activeProfileId.value = null
+        }
+    }
+
+    /** Touch lastUsed du profil actif (auth via binding réussie). */
+    suspend fun touchActiveIfAny() {
+        val id = _activeProfileId.value ?: return
+        touchLastUsed(id)
     }
 
     suspend fun touchLastUsed(id: String) = mutex.withLock {
@@ -218,5 +263,7 @@ class KeyProfileRepository @Inject constructor(
 
     companion object {
         const val META_FILE = "key_profiles_meta.json"
+        const val PREFS_NAME = "key_profiles_prefs"
+        const val KEY_ACTIVE_ID = "active_profile_id"
     }
 }
