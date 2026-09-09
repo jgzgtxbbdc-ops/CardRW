@@ -15,6 +15,10 @@ data class CardDumpDocument(
     @SerialName("integrity_sha256") val integritySha256: String? = null,
     /** Avertissement honnête sur la couverture du dump. */
     val note: String,
+    /** `quick` (cache moniteur) ou `complete` (auth multi-slots + ReadData). */
+    @SerialName("dump_mode") val dumpMode: String = "quick",
+    /** Nom du profil de clés utilisé (null = labo sans profil). */
+    @SerialName("profile_name") val profileName: String? = null,
     val card: DumpCardSection,
     val structure: DumpStructureSection,
     val data: DumpDataSection,
@@ -42,6 +46,8 @@ data class DumpCardSection(
 data class DumpStructureSection(
     val applications: List<DumpApplication>,
     @SerialName("unread_files") val unreadFiles: List<String> = emptyList(),
+    /** Dry-run / post-run : une ligne par nœud (AID / fichier). */
+    val coverage: List<String> = emptyList(),
 )
 
 @Serializable

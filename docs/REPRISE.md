@@ -95,7 +95,7 @@
 | **P1** | `KeyProfile` / `KeyBinding` + repo meta + écran liste/détail CRUD | ✅ |
 | **P2** | `KeyMaterialResolver` moniteur + chip profil actif | ✅ |
 | **P3** | Capture « Enregistrer ce jeu » depuis session | ✅ |
-| **P4–P5** | Dump / restore avec profil | ⬜ **P4 recommandé** |
+| **P4–P5** | Dump / restore avec profil | ✅ **P4** dump complet ; ✅ **P5** restore matériaux |
 | **P6–P7** | Polish chip / export portable + templates | ⬜ (chip basique déjà en P2) |
 
 **P1 livré :**

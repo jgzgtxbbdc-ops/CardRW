@@ -18,16 +18,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import com.cardrw.app.ui.theme.AccessFree
+import com.cardrw.app.ui.theme.AccessNeedAuth
+import com.cardrw.app.ui.theme.AccessNever
+import com.cardrw.app.ui.theme.AccessOk
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,7 +61,7 @@ import com.cardrw.desfire.model.AuthIntent
 import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.KeySettingsInfo
-import com.cardrw.desfire.model.canWriteWith
+
 
 /**
  * Arbre moniteur U4 : **PICC super-nœud → applications → fichiers**.
@@ -72,28 +77,21 @@ fun DesfireCardTree(
     exploreByAid: Map<String, ApplicationExploreResult>,
     busy: Boolean,
     sessionKey: Int?,
-    /** true = session AES (pas DES) prête pour Write / Create / Delete. */
-    structureEnabled: Boolean = false,
     /**
      * true = session DES legacy sur PICC : proposer bascule master DES→AES
      * (Create/Write bloqués tant que non AES).
      */
     desToAesEnabled: Boolean = false,
+    expert: Boolean = false,
     friendlyName: (String) -> String?,
     onSelectPicc: () -> Unit,
-    onDoubleSelectPicc: () -> Unit,
     onSelectApp: (String) -> Unit,
-    onDoubleSelectApp: (String) -> Unit,
     onRefresh: () -> Unit,
     onAuthForFile: (FileNode) -> Unit,
-    onWriteFile: (FileNode) -> Unit = {},
-    onAddApplication: () -> Unit = {},
+    onOpenPiccMenu: () -> Unit = {},
+    onOpenAppMenu: (String) -> Unit = {},
+    onOpenFileMenu: (FileNode) -> Unit = {},
     onUpgradePiccToAes: () -> Unit = {},
-    onFormatPicc: () -> Unit = {},
-    onDeleteApplication: (aidHex: String) -> Unit = {},
-    onAddFile: () -> Unit = {},
-    onDeleteFile: (FileNode) -> Unit = {},
-    onChangeKey: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val isPiccSelected = selectedAidHex.equals("000000", ignoreCase = true)
@@ -107,11 +105,19 @@ fun DesfireCardTree(
             text = stringResource(R.string.card_tree_title),
             style = MaterialTheme.typography.titleSmall,
         )
-        Text(
-            text = stringResource(R.string.card_tree_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (expert) {
+            Text(
+                text = stringResource(R.string.card_tree_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                text = stringResource(R.string.card_tree_hint_beginner),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         // --- Super-nœud PICC ---
         TreeShell(
@@ -126,7 +132,8 @@ fun DesfireCardTree(
                 selected = isPiccSelected,
                 enabled = !busy,
                 onClick = onSelectPicc,
-                onDoubleClick = onDoubleSelectPicc,
+                onLongPress = onOpenPiccMenu,
+                onMore = onOpenPiccMenu,
                 trailing = if (isPiccSelected) {
                     stringResource(R.string.card_app_selected_badge)
                 } else {
@@ -156,29 +163,6 @@ fun DesfireCardTree(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(stringResource(R.string.card_tree_upgrade_aes))
-                        }
-                    }
-                    if (structureEnabled) {
-                        Button(
-                            onClick = onAddApplication,
-                            enabled = !busy,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.card_tree_add_app))
-                        }
-                        OutlinedButton(
-                            onClick = onChangeKey,
-                            enabled = !busy,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.card_tree_change_key))
-                        }
-                        OutlinedButton(
-                            onClick = onFormatPicc,
-                            enabled = !busy,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.card_tree_format_picc))
                         }
                     }
                     RefreshRow(busy = busy, onRefresh = onRefresh)
@@ -216,16 +200,12 @@ fun DesfireCardTree(
                             explore = explore,
                             busy = busy,
                             sessionKey = sessionKey.takeIf { selected },
-                            structureEnabled = structureEnabled,
+                            expert = expert,
                             onSelect = { onSelectApp(hex) },
-                            onDoubleSelect = { onDoubleSelectApp(hex) },
                             onRefresh = onRefresh,
                             onAuthForFile = onAuthForFile,
-                            onWriteFile = onWriteFile,
-                            onDeleteApp = { onDeleteApplication(hex) },
-                            onAddFile = onAddFile,
-                            onDeleteFile = onDeleteFile,
-                            onChangeKey = onChangeKey,
+                            onOpenMenu = { onOpenAppMenu(hex) },
+                            onOpenFileMenu = onOpenFileMenu,
                         )
                     }
                 }
@@ -243,16 +223,12 @@ private fun AppTreeNode(
     explore: ApplicationExploreResult?,
     busy: Boolean,
     sessionKey: Int?,
-    structureEnabled: Boolean,
+    expert: Boolean,
     onSelect: () -> Unit,
-    onDoubleSelect: () -> Unit,
     onRefresh: () -> Unit,
     onAuthForFile: (FileNode) -> Unit,
-    onWriteFile: (FileNode) -> Unit,
-    onDeleteApp: () -> Unit,
-    onAddFile: () -> Unit,
-    onDeleteFile: (FileNode) -> Unit,
-    onChangeKey: () -> Unit,
+    onOpenMenu: () -> Unit,
+    onOpenFileMenu: (FileNode) -> Unit,
 ) {
     val structureComplete = explore != null &&
         (explore.keySettings != null || explore.structureFromCache || explore.files.isNotEmpty() ||
@@ -293,7 +269,8 @@ private fun AppTreeNode(
             selected = selected,
             enabled = !busy,
             onClick = onSelect,
-            onDoubleClick = onDoubleSelect,
+            onLongPress = onOpenMenu,
+            onMore = onOpenMenu,
             trailing = when {
                 selected -> stringResource(R.string.card_app_selected_badge)
                 explore != null -> stringResource(R.string.card_tree_cached_badge)
@@ -343,43 +320,14 @@ private fun AppTreeNode(
                                 node = node,
                                 busy = busy,
                                 sessionKey = sessionKey,
-                                structureEnabled = structureEnabled,
+                                expert = expert,
                                 onAuthForRead = { onAuthForFile(node) },
-                                onWrite = { onWriteFile(node) },
-                                onDelete = { onDeleteFile(node) },
+                                onOpenMenu = { onOpenFileMenu(node) },
                             )
                         }
                     }
                     if (explore.notes.isNotEmpty()) {
                         TreeNotes(explore.notes)
-                    }
-                }
-                if (structureEnabled) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Button(
-                            onClick = onAddFile,
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.card_tree_add_file))
-                        }
-                        OutlinedButton(
-                            onClick = onDeleteApp,
-                            enabled = !busy,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.card_tree_delete_app))
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = onChangeKey,
-                        enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.card_tree_change_key))
                     }
                 }
                 RefreshRow(busy = busy, onRefresh = onRefresh)
@@ -405,10 +353,9 @@ private fun FileTreeNode(
     node: FileNode,
     busy: Boolean,
     sessionKey: Int?,
-    structureEnabled: Boolean,
+    expert: Boolean,
     onAuthForRead: () -> Unit,
-    onWrite: () -> Unit,
-    onDelete: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     var expanded by rememberSaveable(node.fileNo) { mutableStateOf(false) }
     val rights = node.settings.accessRights
@@ -418,34 +365,39 @@ private fun FileTreeNode(
     val needsAuthForRead = node.dataHex == null && readPlan.barrier == AuthBarrier.NEEDS_KEY
     val neverRead = readPlan.barrier == AuthBarrier.NEVER
     val dataHex = node.dataHex
-    val writePlan = remember(node.fileNo, rights, sessionKey) {
-        AuthKeyPlanner.plan(AuthIntent.WriteFile(node.fileNo, rights), sessionKey)
-    }
-    val canWriteNow = structureEnabled &&
-        (rights.isWriteFree || rights.canWriteWith(sessionKey))
-    // Afficher « Écrire… » aussi si une auth W/RW peut débloquer (intention auto)
-    val showWriteCta = structureEnabled && writePlan.barrier != AuthBarrier.NEVER &&
-        (canWriteNow || writePlan.barrier == AuthBarrier.NEEDS_KEY)
-    // Plein = contenu lu, Free, Never (état final), ou erreur connue
     val complete = dataHex != null ||
         neverRead ||
         rights.isReadFree ||
         node.dataError != null
 
     val accessBadge = when {
-        dataHex != null -> stringResource(R.string.card_file_badge_read)
-        neverRead -> stringResource(R.string.card_file_badge_never)
-        rights.isReadFree -> stringResource(R.string.card_file_badge_free)
-        needsAuthForRead -> stringResource(R.string.card_file_badge_auth)
+        dataHex != null -> stringResource(
+            if (expert) R.string.card_file_badge_read else R.string.card_file_badge_read_beginner,
+        )
+        neverRead -> stringResource(
+            if (expert) R.string.card_file_badge_never else R.string.card_file_badge_never_beginner,
+        )
+        rights.isReadFree -> stringResource(
+            if (expert) R.string.card_file_badge_free else R.string.card_file_badge_free_beginner,
+        )
+        needsAuthForRead -> stringResource(
+            if (expert) R.string.card_file_badge_auth else R.string.card_file_badge_auth_beginner,
+        )
         node.dataError != null -> stringResource(R.string.card_file_badge_error)
         else -> stringResource(R.string.card_file_badge_pending)
     }
     val accessColor = when {
-        dataHex != null -> MaterialTheme.colorScheme.tertiary
-        neverRead -> MaterialTheme.colorScheme.error
-        needsAuthForRead -> MaterialTheme.colorScheme.primary
-        node.dataError != null -> MaterialTheme.colorScheme.error
+        dataHex != null -> AccessOk
+        neverRead -> AccessNever
+        needsAuthForRead -> AccessNeedAuth
+        rights.isReadFree -> AccessFree
+        node.dataError != null -> AccessNever
         else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val lineLabel = if (expert) {
+        node.settings.compactLine
+    } else {
+        beginnerFileLine(node)
     }
 
     TreeShell(
@@ -454,21 +406,21 @@ private fun FileTreeNode(
         accent = MaterialTheme.colorScheme.secondary,
         nested = true,
     ) {
-        // Une ligne : F0 · Std · 16B · FULL · r:1 w:2 rw:2 ch:0  [OK]
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable {
-                    if (needsAuthForRead && !busy) {
-                        // Tap nœud lacunaire = auth lecture (intention Read)
-                        onAuthForRead()
-                    } else {
-                        expanded = !expanded
-                    }
+                .pointerInput(busy, needsAuthForRead, node.fileNo) {
+                    if (busy) return@pointerInput
+                    detectTapGestures(
+                        onTap = {
+                            if (needsAuthForRead) onAuthForRead() else expanded = !expanded
+                        },
+                        onLongPress = { onOpenMenu() },
+                    )
                 }
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Column(
                 modifier = Modifier.weight(1f),
@@ -479,10 +431,10 @@ private fun FileTreeNode(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
-                        text = node.settings.compactLine,
+                        text = lineLabel,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = if (expert) FontFamily.Monospace else FontFamily.Default,
                         modifier = Modifier.weight(1f, fill = false),
                         maxLines = 2,
                     )
@@ -493,7 +445,6 @@ private fun FileTreeNode(
                         color = accessColor,
                     )
                 }
-                // Preview hex collée sous la ligne (sans expand)
                 if (dataHex != null && !expanded) {
                     Text(
                         text = hexPreview(dataHex, maxBytes = 8),
@@ -508,120 +459,108 @@ private fun FileTreeNode(
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
             )
+            IconButton(
+                onClick = onOpenMenu,
+                enabled = !busy,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.MoreVert,
+                    contentDescription = stringResource(R.string.card_actions),
+                )
+            }
         }
 
-        // CTA techniques EN courts, en ligne (Auth k1 · Write · Del)
-        val hasCta = needsAuthForRead || showWriteCta || structureEnabled ||
-            (neverRead && dataHex == null)
-        if (hasCta || expanded) {
+        if (neverRead && dataHex == null && !needsAuthForRead) {
+            Text(
+                text = stringResource(R.string.card_file_read_never),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+            )
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            val dataError = node.dataError
             Column(
-                modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                if (neverRead && dataHex == null && !needsAuthForRead) {
+                HorizontalDivider()
+                if (!expert) {
                     Text(
-                        text = stringResource(R.string.card_file_read_never),
+                        text = beginnerRightsLine(rights),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (needsAuthForRead || showWriteCta || structureEnabled) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(0.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (needsAuthForRead) {
-                            val keysLabel = readPlan.candidates.joinToString(",") { "k${it.keyNo}" }
-                            TextButton(
-                                onClick = onAuthForRead,
-                                enabled = !busy,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(
-                                    stringResource(
-                                        R.string.card_file_auth_to_read,
-                                        keysLabel.ifEmpty { "?" },
-                                    ),
-                                    maxLines = 1,
-                                )
-                            }
-                        }
-                        if (showWriteCta) {
-                            val writeKeys = writePlan.candidates.joinToString(",") { "k${it.keyNo}" }
-                            TextButton(
-                                onClick = onWrite,
-                                enabled = !busy,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(
-                                    if (canWriteNow || writeKeys.isEmpty()) {
-                                        stringResource(R.string.card_file_write_action)
-                                    } else {
-                                        stringResource(
-                                            R.string.card_file_write_auth_action,
-                                            writeKeys,
-                                        )
-                                    },
-                                    maxLines = 1,
-                                )
-                            }
-                        }
-                        if (structureEnabled) {
-                            TextButton(
-                                onClick = onDelete,
-                                enabled = !busy,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(
-                                    stringResource(R.string.card_file_delete_action),
-                                    maxLines = 1,
-                                )
-                            }
-                        }
+                when {
+                    dataHex != null -> {
+                        Text(
+                            text = stringResource(
+                                R.string.card_file_data_full,
+                                dataHex.length / 2,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = prettyHex(dataHex),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
                     }
-                }
-
-                AnimatedVisibility(visible = expanded) {
-                    val dataError = node.dataError
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        HorizontalDivider()
-                        when {
-                            dataHex != null -> {
-                                Text(
-                                    text = stringResource(
-                                        R.string.card_file_data_full,
-                                        dataHex.length / 2,
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                                Text(
-                                    text = prettyHex(dataHex),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                )
-                            }
-                            dataError != null -> {
-                                Text(
-                                    text = dataError,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                            else -> {
-                                Text(
-                                    text = stringResource(R.string.card_file_no_data),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                    dataError != null -> {
+                        Text(
+                            text = dataError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    else -> {
+                        Text(
+                            text = stringResource(R.string.card_file_no_data),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun beginnerFileLine(node: FileNode): String {
+    val settings = node.settings
+    val type = when (settings.fileType) {
+        com.cardrw.desfire.model.FileType.STANDARD -> stringResource(R.string.card_file_type_std)
+        com.cardrw.desfire.model.FileType.BACKUP -> stringResource(R.string.card_file_type_backup)
+        com.cardrw.desfire.model.FileType.VALUE -> stringResource(R.string.card_file_type_value)
+        com.cardrw.desfire.model.FileType.LINEAR_RECORDS -> stringResource(R.string.card_file_type_lin)
+        com.cardrw.desfire.model.FileType.CYCLIC_RECORDS -> stringResource(R.string.card_file_type_cyc)
+        else -> settings.fileType.label
+    }
+    val size = settings.sizeBytes?.let { stringResource(R.string.card_tree_bytes_unit, it) } ?: "—"
+    val comm = when (settings.commMode) {
+        com.cardrw.desfire.model.CommMode.PLAIN -> stringResource(R.string.card_comm_plain)
+        com.cardrw.desfire.model.CommMode.MACED -> stringResource(R.string.card_comm_mac)
+        com.cardrw.desfire.model.CommMode.FULL -> stringResource(R.string.card_comm_full)
+    }
+    return stringResource(R.string.card_file_beginner_line, settings.fileNo, type, size, comm)
+}
+
+@Composable
+private fun beginnerRightsLine(rights: com.cardrw.desfire.model.AccessRights): String {
+    val readLabel = beginnerKeyLabel(rights.read)
+    val writeLabel = beginnerKeyLabel(rights.write)
+    return stringResource(R.string.card_file_beginner_rights, readLabel, writeLabel)
+}
+
+@Composable
+private fun beginnerKeyLabel(v: Int): String = when (v and 0x0F) {
+    0x0E -> stringResource(R.string.card_right_free)
+    0x0F -> stringResource(R.string.card_right_never)
+    else -> stringResource(R.string.card_right_key, v and 0x0F)
 }
 
 /**
@@ -772,7 +711,8 @@ private fun TreeNodeHeader(
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
-    onDoubleClick: () -> Unit,
+    onLongPress: () -> Unit = {},
+    onMore: (() -> Unit)? = null,
     trailing: String?,
     monospaceTitle: Boolean = false,
 ) {
@@ -782,11 +722,11 @@ private fun TreeNodeHeader(
             .pointerInput(enabled, title) {
                 if (!enabled) return@pointerInput
                 detectTapGestures(
-                    onDoubleTap = { onDoubleClick() },
+                    onLongPress = { onLongPress() },
                     onTap = { onClick() },
                 )
             }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -823,6 +763,18 @@ private fun TreeNodeHeader(
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
             )
+        }
+        if (onMore != null) {
+            IconButton(
+                onClick = onMore,
+                enabled = enabled,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.MoreVert,
+                    contentDescription = stringResource(R.string.card_actions),
+                )
+            }
         }
     }
 }

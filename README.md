@@ -4,7 +4,7 @@ Application Android pour **encoder, lire et comprendre** des cartes MIFARE DESFi
 
 - **applicationId :** `com.cardrw.app`
 - **Cahier des charges :** [`docs/cahier-des-charges-desfire-ev3.md`](docs/cahier-des-charges-desfire-ev3.md)
-- **Release :** **v0.5** — session authentifiée & exploration lecture (**validée terrain**)
+- **Release :** **v0.9** — coquille atelier (nav, densité, menus nœud) ; protocole v0.5+ validé terrain
 
 ## Modules
 

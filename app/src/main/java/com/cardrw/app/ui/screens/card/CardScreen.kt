@@ -1,13 +1,7 @@
 package com.cardrw.app.ui.screens.card
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,40 +9,24 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.outlined.Nfc
+import androidx.compose.material.icons.automirrored.outlined.ListAlt
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MenuAnchorType
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,27 +40,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import android.content.Intent
-import android.widget.Toast
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cardrw.app.R
-import com.cardrw.app.data.model.KeyVaultEntryMeta
+import com.cardrw.app.ui.screens.journal.JournalPanel
 import com.cardrw.app.viewmodel.CardPhase
 import com.cardrw.app.viewmodel.CardUiState
 import com.cardrw.app.viewmodel.CardViewModel
-import com.cardrw.desfire.crypto.AesConstants
+import com.cardrw.app.viewmodel.UiSettingsViewModel
 import com.cardrw.desfire.crypto.SecureMessagingLevel
 import com.cardrw.desfire.dump.DumpRestorePlanner
 import com.cardrw.desfire.model.AuthBarrier
@@ -92,27 +64,98 @@ import com.cardrw.desfire.model.AuthKeyPlanner
 import com.cardrw.desfire.model.CardIdentity
 import com.cardrw.desfire.model.FileNode
 import com.cardrw.desfire.model.UidKind
-import com.cardrw.desfire.model.VersionInfo
-import com.cardrw.desfire.session.AuthSession
-import com.cardrw.desfire.util.Hex
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardScreen(
-    onBack: () -> Unit,
     viewModel: CardViewModel = hiltViewModel(),
+    settings: UiSettingsViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
-    // NFC : reader mode dans MainActivity + NfcTagBus → CardViewModel (pas ici)
+    val expert by settings.expertMode.collectAsStateWithLifecycle()
+    var showOverflow by remember { mutableStateOf(false) }
+    var showJournal by remember { mutableStateOf(false) }
+    var restoreNonce by remember { mutableIntStateOf(0) }
+    var dumpNonce by remember { mutableIntStateOf(0) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.card_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
+                actions = {
+                    IconButton(onClick = { settings.setExpertMode(!expert) }) {
+                        Icon(
+                            Icons.Outlined.Tune,
+                            contentDescription = stringResource(
+                                if (expert) R.string.density_expert else R.string.density_beginner,
+                            ),
+                            tint = if (expert) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    IconButton(onClick = { showJournal = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ListAlt,
+                            contentDescription = stringResource(R.string.journal_title),
+                        )
+                    }
+                    IconButton(onClick = { showOverflow = true }) {
+                        Icon(
+                            Icons.Outlined.MoreVert,
+                            contentDescription = stringResource(R.string.card_actions),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showOverflow,
+                        onDismissRequest = { showOverflow = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.card_export_dump)) },
+                            onClick = {
+                                showOverflow = false
+                                viewModel.previewDumpCoverage()
+                                dumpNonce++
+                            },
+                            enabled = ui.phase == CardPhase.Ready && !ui.busy,
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.card_restore_dump)) },
+                            onClick = {
+                                showOverflow = false
+                                viewModel.clearRestorePreview()
+                                restoreNonce++
+                            },
+                            enabled = ui.phase == CardPhase.Ready && !ui.busy,
+                        )
+                        if (ui.rememberedSlotCount > 0) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            R.string.card_capture_profile,
+                                            ui.rememberedSlotCount,
+                                        ),
+                                    )
+                                },
+                                onClick = {
+                                    showOverflow = false
+                                    viewModel.openCaptureFromSession()
+                                },
+                                enabled = !ui.busy,
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.card_reread)) },
+                            onClick = {
+                                showOverflow = false
+                                viewModel.resetToWaiting()
+                            },
+                            enabled = !ui.busy,
+                        )
                     }
                 },
             )
@@ -123,21 +166,21 @@ fun CardScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(padding),
                 ) {
                     WaitingCard()
                 }
             }
             CardPhase.Reading -> {
-                Row(
+                Column(
                     modifier = Modifier
-                        .padding(padding)
-                        .padding(horizontal = 16.dp, vertical = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        .fillMaxSize()
+                        .padding(padding),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    CircularProgressIndicator()
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp))
+                    Spacer(Modifier.height(16.dp))
                     Text(stringResource(R.string.card_reading))
                 }
             }
@@ -148,6 +191,9 @@ fun CardScreen(
                         ui = ui,
                         identity = identity,
                         viewModel = viewModel,
+                        expert = expert,
+                        restoreNonce = restoreNonce,
+                        dumpNonce = dumpNonce,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding),
@@ -178,18 +224,34 @@ fun CardScreen(
             }
         }
     }
+
+    if (showJournal) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showJournal = false },
+            sheetState = sheetState,
+        ) {
+            Column(Modifier.fillMaxWidth().height(420.dp)) {
+                Text(
+                    text = stringResource(R.string.journal_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+                JournalPanel(showToolbar = true)
+            }
+        }
+    }
 }
 
-/**
- * Moniteur diagnostic (U2) : barre session sticky + scroll infos ;
- * saisie clé dans [AuthBottomSheet], pas dans le document principal.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReadyMonitor(
     ui: CardUiState,
     identity: CardIdentity,
     viewModel: CardViewModel,
+    expert: Boolean,
+    restoreNonce: Int,
+    dumpNonce: Int,
     modifier: Modifier = Modifier,
 ) {
     val authenticated = ui.authSession?.authenticated == true
@@ -199,17 +261,17 @@ private fun ReadyMonitor(
     var authPlan by remember { mutableStateOf<AuthKeyPlan?>(null) }
     var neverMessage by remember { mutableStateOf<String?>(null) }
     var closeSheetWhenAuthSettles by remember { mutableStateOf(false) }
-    /** FileNo en cours d’édition (contenu toujours relu depuis ui.explore). */
     var writeFileNo by remember { mutableStateOf<Int?>(null) }
     var showCreateApp by remember { mutableStateOf(false) }
     var showCreateFile by remember { mutableStateOf(false) }
     var showUpgradeAes by remember { mutableStateOf(false) }
     var showChangeKey by remember { mutableStateOf(false) }
     var showRestoreDump by remember { mutableStateOf(false) }
+    var showDumpSheet by remember { mutableStateOf(false) }
     var deleteAppAid by remember { mutableStateOf<String?>(null) }
     var deleteFileNo by remember { mutableStateOf<Int?>(null) }
     var showFormatPicc by remember { mutableStateOf(false) }
-    // U5 : conserver / restaurer la position de scroll après auth / explore
+    var nodeMenu by remember { mutableStateOf<OpenNodeMenu?>(null) }
     val monitorScroll = rememberScrollState()
     var savedScrollPx by rememberSaveable { mutableIntStateOf(0) }
     val structureEnabled = authenticated &&
@@ -261,11 +323,9 @@ private fun ReadyMonitor(
         if (showAuthSheet) viewModel.reloadVault()
     }
 
-    // Échec auto-auth → sheet (plan intention si fourni, sinon générique)
     LaunchedEffect(ui.openAuthSheetNonce, ui.pendingAuthPlan) {
         if (ui.openAuthSheetNonce > 0L) {
             val plan = ui.pendingAuthPlan ?: viewModel.suggestAuthPlan()
-            // forceGeneric only if vraiment pas de plan d’intention
             openAuthSheet(
                 plan = plan,
                 forceGenericIfNone = plan.candidates.isEmpty() && plan.allowAnyKey,
@@ -274,14 +334,23 @@ private fun ReadyMonitor(
         }
     }
 
-    // Write : ouvrir sheet une fois session écriture prête
     LaunchedEffect(ui.pendingWriteFileNo) {
         val no = ui.pendingWriteFileNo ?: return@LaunchedEffect
         writeFileNo = no
         viewModel.consumePendingWriteFile()
     }
 
-    // Dump exporté → presse-papiers + toast (JSON sans secrets)
+    LaunchedEffect(restoreNonce) {
+        if (restoreNonce > 0) {
+            showRestoreDump = true
+        }
+    }
+    LaunchedEffect(dumpNonce) {
+        if (dumpNonce > 0) {
+            showDumpSheet = true
+        }
+    }
+
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     LaunchedEffect(ui.lastDumpJson, ui.lastDumpFileName) {
@@ -292,10 +361,8 @@ private fun ReadyMonitor(
             context.getString(R.string.card_export_dump_copied),
             Toast.LENGTH_SHORT,
         ).show()
-        // JSON resté en mémoire pour Partager ; clear au prochain export
     }
 
-    // Ferme la sheet après auth OK (explore auto U1 peut encore tourner : on ferme dès session OK + !busy auth phase)
     LaunchedEffect(ui.busy, ui.authSession?.authenticated, ui.errorMessage, closeSheetWhenAuthSettles) {
         if (!closeSheetWhenAuthSettles) return@LaunchedEffect
         if (ui.busy) return@LaunchedEffect
@@ -305,7 +372,6 @@ private fun ReadyMonitor(
         }
     }
 
-    // Si l’auth enchaîne explore (busy reste true), fermer dès que la session est authentifiée
     LaunchedEffect(ui.authSession?.authenticated, closeSheetWhenAuthSettles, showAuthSheet) {
         if (showAuthSheet &&
             closeSheetWhenAuthSettles &&
@@ -318,7 +384,9 @@ private fun ReadyMonitor(
     }
 
     Column(modifier = modifier) {
-        // --- Zone sticky (hors scroll) ---
+        if (ui.busy) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -330,7 +398,6 @@ private fun ReadyMonitor(
                 selectedAid = ui.selectedAidHex,
                 busy = ui.busy,
                 onOpenAuth = {
-                    // Barre session : plan contextuel, sinon générique (changer de clé)
                     openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
                 },
             )
@@ -370,7 +437,6 @@ private fun ReadyMonitor(
             }
         }
 
-        // --- Moniteur scrollable (données seulement) ---
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -385,13 +451,14 @@ private fun ReadyMonitor(
                 realUidHex = ui.realUidHex,
             )
 
-            // U5 : GetCardUID auto après auth ; bouton secours si Random encore sans UID réel
             if (authenticated && identity.uidKind == UidKind.RANDOM && ui.realUidHex == null) {
-                Text(
-                    text = stringResource(R.string.card_get_card_uid_auto_hint),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (expert) {
+                    Text(
+                        text = stringResource(R.string.card_get_card_uid_auto_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 TextButton(
                     onClick = { viewModel.fetchRealUid() },
                     enabled = !ui.busy,
@@ -402,30 +469,23 @@ private fun ReadyMonitor(
             }
 
             val version = identity.version
-            if (version != null) {
+            if (version != null && expert) {
                 VersionTechnicalSection(version = version)
             }
 
-            // U4 — arbre PICC → apps → fichiers (+ créer / écrire / supprimer)
             DesfireCardTree(
                 applications = identity.applications,
                 selectedAidHex = ui.selectedAidHex,
                 exploreByAid = ui.exploreByAid,
                 busy = ui.busy,
                 sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber,
-                structureEnabled = structureEnabled,
                 desToAesEnabled = desToAesEnabled,
+                expert = expert,
                 friendlyName = viewModel::friendlyName,
                 onSelectPicc = {
-                    viewModel.selectApplication("000000", tryDefaultAuth = false)
-                },
-                onDoubleSelectPicc = {
                     viewModel.selectApplication("000000", tryDefaultAuth = true)
                 },
                 onSelectApp = { hex ->
-                    viewModel.selectApplication(hex, tryDefaultAuth = false)
-                },
-                onDoubleSelectApp = { hex ->
                     viewModel.selectApplication(hex, tryDefaultAuth = true)
                 },
                 onRefresh = { viewModel.explore() },
@@ -434,55 +494,16 @@ private fun ReadyMonitor(
                         openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
                     }
                 },
-                onWriteFile = { node ->
-                    viewModel.requestWriteFile(node)
-                },
-                onAddApplication = { showCreateApp = true },
+                onOpenPiccMenu = { nodeMenu = OpenNodeMenu.Picc },
+                onOpenAppMenu = { hex -> nodeMenu = OpenNodeMenu.App(hex) },
+                onOpenFileMenu = { node -> nodeMenu = OpenNodeMenu.File(node) },
                 onUpgradePiccToAes = { showUpgradeAes = true },
-                onFormatPicc = { showFormatPicc = true },
-                onDeleteApplication = { aid -> deleteAppAid = aid },
-                onAddFile = { showCreateFile = true },
-                onDeleteFile = { node -> deleteFileNo = node.fileNo },
-                onChangeKey = { showChangeKey = true },
             )
 
-            if (identity.rawNotes.isNotEmpty()) {
+            if (identity.rawNotes.isNotEmpty() && expert) {
                 NotesSection(notes = identity.rawNotes)
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-            if (ui.rememberedSlotCount > 0) {
-                Button(
-                    onClick = { viewModel.openCaptureFromSession() },
-                    enabled = !ui.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        stringResource(
-                            R.string.card_capture_profile,
-                            ui.rememberedSlotCount,
-                        ),
-                    )
-                }
-            }
-            OutlinedButton(
-                onClick = { viewModel.exportMonitorDump() },
-                enabled = !ui.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.card_export_dump))
-            }
-            OutlinedButton(
-                onClick = {
-                    viewModel.clearRestorePreview()
-                    showRestoreDump = true
-                },
-                enabled = !ui.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.card_restore_dump))
-            }
-            // Après export : partage / re-copie du dernier dump (toujours sans secrets)
             val lastDump = ui.lastDumpJson
             val lastDumpName = ui.lastDumpFileName
             if (lastDump != null && lastDumpName != null) {
@@ -529,13 +550,6 @@ private fun ReadyMonitor(
                         Text(stringResource(R.string.dumps_share))
                     }
                 }
-            }
-            OutlinedButton(
-                onClick = { viewModel.resetToWaiting() },
-                enabled = !ui.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.card_reread))
             }
         }
     }
@@ -625,7 +639,6 @@ private fun ReadyMonitor(
         }
     }
 
-    // Auth KO + option coffre cochée → proposer d’enregistrer quand même (mauvais slot ?)
     ui.pendingVaultSave?.let { offer ->
         AlertDialog(
             onDismissRequest = { viewModel.dismissPendingVaultSave() },
@@ -651,7 +664,6 @@ private fun ReadyMonitor(
         )
     }
 
-    // Write — contenu toujours relu depuis explore (liveWriteNode)
     if (writeFileNo != null) {
         val node = liveWriteNode
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -714,7 +726,6 @@ private fun ReadyMonitor(
     }
 
     if (showCreateFile) {
-        // Premier n° libre (0–31) — se met à jour après Create OK + re-explore.
         val existing = ui.explore?.files?.map { it.fileNo }?.toSet().orEmpty()
         val nextNo = (0..31).firstOrNull { it !in existing } ?: 0
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -750,6 +761,34 @@ private fun ReadyMonitor(
         }
     }
 
+    if (showDumpSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (!ui.busy) {
+                    showDumpSheet = false
+                    viewModel.clearDumpCoverage()
+                }
+            },
+            sheetState = sheetState,
+        ) {
+            DumpSheetContent(
+                coverage = ui.dumpCoverage,
+                busy = ui.busy,
+                statusLine = ui.statusLine,
+                errorMessage = ui.errorMessage,
+                onDismiss = {
+                    if (!ui.busy) {
+                        showDumpSheet = false
+                        viewModel.clearDumpCoverage()
+                    }
+                },
+                onPreview = { viewModel.previewDumpCoverage() },
+                onExport = { mode -> viewModel.exportDump(mode) },
+            )
+        }
+    }
+
     if (showRestoreDump) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val dumpNames = remember { viewModel.listDumpFileNames() }
@@ -770,6 +809,10 @@ private fun ReadyMonitor(
                 previewLines = ui.restorePreviewLines,
                 previewWarnings = ui.restorePreviewWarnings,
                 selectedFileName = ui.restorePreviewFileName,
+                profileName = ui.activeProfileName,
+                materialSummary = ui.restoreMaterialSummary,
+                materialLines = ui.restoreMaterialLines,
+                materialBlocking = ui.restoreMaterialBlocking,
                 onDismiss = {
                     if (!ui.busy) {
                         showRestoreDump = false
@@ -794,30 +837,69 @@ private fun ReadyMonitor(
         }
     }
 
+    nodeMenu?.let { menu ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val items = nodeMenuItems(
+            menu = menu,
+            structureEnabled = structureEnabled,
+            desToAesEnabled = desToAesEnabled,
+            sessionKey = ui.authSession?.takeIf { it.authenticated }?.keyNumber,
+            busy = ui.busy,
+            onAuthPicc = {
+                viewModel.selectApplication("000000", tryDefaultAuth = false)
+                openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
+            },
+            onAuthApp = { hex ->
+                viewModel.selectApplication(hex, tryDefaultAuth = false)
+                openAuthSheet(viewModel.suggestAuthPlan(), forceGenericIfNone = true)
+            },
+            onAuthFile = { node ->
+                if (!viewModel.tryAuthFileWithRemembered(node)) {
+                    openAuthSheet(viewModel.authPlanForFile(node), forceGenericIfNone = false)
+                }
+            },
+            onWriteFile = { node -> viewModel.requestWriteFile(node) },
+            onAddApp = { showCreateApp = true },
+            onAddFile = { showCreateFile = true },
+            onChangeKey = { showChangeKey = true },
+            onFormat = { showFormatPicc = true },
+            onUpgradeAes = { showUpgradeAes = true },
+            onDeleteApp = { deleteAppAid = it },
+            onDeleteFile = { deleteFileNo = it.fileNo },
+            onRefresh = { viewModel.explore() },
+        )
+        ModalBottomSheet(
+            onDismissRequest = { nodeMenu = null },
+            sheetState = sheetState,
+        ) {
+            val title = when (menu) {
+                OpenNodeMenu.Picc -> stringResource(R.string.card_picc_label)
+                is OpenNodeMenu.App -> stringResource(R.string.card_node_app, prettyAid(menu.aidHex))
+                is OpenNodeMenu.File -> stringResource(R.string.card_node_file, menu.node.fileNo)
+            }
+            val subtitle = when (menu) {
+                OpenNodeMenu.Picc -> "00 00 00"
+                is OpenNodeMenu.App -> menu.aidHex
+                is OpenNodeMenu.File -> menu.node.settings.compactLine
+            }
+            NodeActionSheet(
+                title = title,
+                subtitle = subtitle,
+                items = items,
+                onDismiss = { nodeMenu = null },
+            )
+        }
+    }
+
     if (showFormatPicc) {
-        AlertDialog(
-            onDismissRequest = { if (!ui.busy) showFormatPicc = false },
-            title = { Text(stringResource(R.string.card_format_picc_title)) },
-            text = { Text(stringResource(R.string.card_format_picc_message)) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.formatPiccLab()
-                        showFormatPicc = false
-                    },
-                    enabled = !ui.busy,
-                ) {
-                    Text(stringResource(R.string.card_format_picc_confirm))
-                }
+        FormatPiccDialog(
+            uidDisplay = ui.realUidHex ?: identity.displayUid,
+            busy = ui.busy,
+            onConfirm = {
+                viewModel.formatPiccLab()
+                showFormatPicc = false
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { showFormatPicc = false },
-                    enabled = !ui.busy,
-                ) {
-                    Text(stringResource(R.string.card_auth_cancel))
-                }
-            },
+            onDismiss = { showFormatPicc = false },
         )
     }
 
@@ -871,9 +953,6 @@ private fun ReadyMonitor(
         )
     }
 
-    // Create app / Create file restent ouverts après succès (n°/AID suivant auto + message OK).
-    // Upgrade AES : fermer dès que la session n’est plus DES (succès ou re-auth AES).
-    // Ne pas s’appuyer sur statusLine — runExplore l’écrase immédiatement après la bascule.
     LaunchedEffect(desToAesEnabled, showUpgradeAes) {
         if (showUpgradeAes && !desToAesEnabled) {
             showUpgradeAes = false
@@ -881,1537 +960,103 @@ private fun ReadyMonitor(
     }
 }
 
-/** Paramètres d’auth depuis la sheet (hex ou coffre). */
-private data class AuthMaterialRequest(
-    val keyNo: Int,
-    val keyHex: String? = null,
-    val vaultEntryId: String? = null,
-    val saveAsVaultName: String? = null,
-    /** P2 : upsert binding sur le profil actif après auth OK. */
-    val bindToActiveProfile: Boolean = false,
-)
-
 @Composable
-private fun BusyLabel(busy: Boolean, text: String) {
-    if (busy) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            Text(text)
-        }
-    } else {
-        Text(text)
-    }
-}
-
-/** P3 : sheet capture session → profil + coffre si besoin. */
-@Composable
-private fun CaptureProfileSheet(
-    preview: com.cardrw.app.viewmodel.CapturePreviewUi,
+private fun nodeMenuItems(
+    menu: OpenNodeMenu,
+    structureEnabled: Boolean,
+    desToAesEnabled: Boolean,
+    sessionKey: Int?,
     busy: Boolean,
-    errorMessage: String?,
-    onNameChange: (String) -> Unit,
-    onToggleSlot: (String) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 24.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_capture_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = stringResource(R.string.card_capture_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = preview.suggestedName,
-            onValueChange = onNameChange,
-            label = { Text(stringResource(R.string.card_capture_name)) },
-            singleLine = true,
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            text = stringResource(R.string.card_capture_slots_header),
-            style = MaterialTheme.typography.labelMedium,
-        )
-        preview.slots.forEach { slot ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = !busy) { onToggleSlot(slot.selectionKey) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = slot.selected,
-                    onCheckedChange = { onToggleSlot(slot.selectionKey) },
-                    enabled = !busy,
+    onAuthPicc: () -> Unit,
+    onAuthApp: (String) -> Unit,
+    onAuthFile: (FileNode) -> Unit,
+    onWriteFile: (FileNode) -> Unit,
+    onAddApp: () -> Unit,
+    onAddFile: () -> Unit,
+    onChangeKey: () -> Unit,
+    onFormat: () -> Unit,
+    onUpgradeAes: () -> Unit,
+    onDeleteApp: (String) -> Unit,
+    onDeleteFile: (FileNode) -> Unit,
+    onRefresh: () -> Unit,
+): List<NodeActionItem> {
+    val enabled = !busy
+    return when (menu) {
+        OpenNodeMenu.Picc -> buildList {
+            add(NodeActionItem(stringResource(R.string.card_auth_action), enabled = enabled, onClick = onAuthPicc))
+            add(NodeActionItem(stringResource(R.string.card_action_refresh), enabled = enabled, onClick = onRefresh))
+            if (desToAesEnabled) {
+                add(NodeActionItem(stringResource(R.string.card_tree_upgrade_aes), enabled = enabled, onClick = onUpgradeAes))
+            }
+            if (structureEnabled) {
+                add(NodeActionItem(stringResource(R.string.card_tree_add_app), enabled = enabled, onClick = onAddApp))
+                add(NodeActionItem(stringResource(R.string.card_tree_change_key), enabled = enabled, onClick = onChangeKey))
+                add(
+                    NodeActionItem(
+                        stringResource(R.string.card_tree_format_picc),
+                        destructive = true,
+                        enabled = enabled,
+                        onClick = onFormat,
+                    ),
                 )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = slot.label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Text(
-                        text = slot.sourceLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
-        if (preview.vaultCreatesNeeded > 0) {
-            Text(
-                text = stringResource(
-                    R.string.card_capture_vault_creates,
-                    preview.vaultCreatesNeeded,
+        is OpenNodeMenu.App -> buildList {
+            add(
+                NodeActionItem(
+                    stringResource(R.string.card_auth_action),
+                    enabled = enabled,
+                    onClick = { onAuthApp(menu.aidHex) },
                 ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
             )
-        }
-        errorMessage?.let {
-            Text(it, color = MaterialTheme.colorScheme.error)
-        }
-        Button(
-            onClick = onConfirm,
-            enabled = !busy &&
-                preview.suggestedName.isNotBlank() &&
-                preview.slots.any { it.selected },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BusyLabel(busy = busy, text = stringResource(R.string.card_capture_confirm))
-        }
-        TextButton(
-            onClick = onDismiss,
-            enabled = !busy,
-            modifier = Modifier.align(Alignment.End),
-        ) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-/** P2 : chip profil actif sous la barre session. */
-@Composable
-private fun ActiveProfileChip(
-    profileName: String?,
-    busy: Boolean,
-    onClick: () -> Unit,
-) {
-    val label = if (profileName != null) {
-        stringResource(R.string.card_profile_active, profileName)
-    } else {
-        stringResource(R.string.card_profile_none)
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-            .clickable(enabled = !busy, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (profileName != null) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
-        Text(
-            text = stringResource(R.string.card_profile_change),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-    }
-}
-
-@Composable
-private fun ProfilePickerSheet(
-    profiles: List<com.cardrw.app.viewmodel.ProfileSummary>,
-    activeProfileId: String?,
-    onSelect: (String?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_profile_picker_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = stringResource(R.string.card_profile_picker_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        FilterChip(
-            selected = activeProfileId == null,
-            onClick = { onSelect(null) },
-            label = { Text(stringResource(R.string.card_profile_none_option)) },
-        )
-        if (profiles.isEmpty()) {
-            Text(
-                text = stringResource(R.string.card_profile_picker_empty),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            profiles.forEach { p ->
-                FilterChip(
-                    selected = p.id == activeProfileId,
-                    onClick = { onSelect(p.id) },
-                    label = {
-                        Text(
-                            stringResource(
-                                R.string.card_profile_picker_item,
-                                p.displayName,
-                                p.bindingCount,
-                            ),
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
+            add(NodeActionItem(stringResource(R.string.card_action_refresh), enabled = enabled, onClick = onRefresh))
+            if (structureEnabled) {
+                add(NodeActionItem(stringResource(R.string.card_tree_add_file), enabled = enabled, onClick = onAddFile))
+                add(NodeActionItem(stringResource(R.string.card_tree_change_key), enabled = enabled, onClick = onChangeKey))
+                add(
+                    NodeActionItem(
+                        stringResource(R.string.card_tree_delete_app),
+                        destructive = true,
+                        enabled = enabled,
+                        onClick = { onDeleteApp(menu.aidHex) },
+                    ),
                 )
             }
         }
-        TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-/** Barre session sticky : état + porte vers la sheet auth (U2). */
-@Composable
-private fun AuthSessionBar(
-    session: AuthSession?,
-    selectedAid: String?,
-    busy: Boolean,
-    onOpenAuth: () -> Unit,
-) {
-    val shape = RoundedCornerShape(10.dp)
-    val active = session?.authenticated == true
-    val bg = if (active) {
-        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.75f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-    }
-    val canAuth = selectedAid != null && !busy
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(bg)
-            .clickable(enabled = canAuth, onClick = onOpenAuth)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.card_session_label),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (session?.authenticated == true) {
-                Text(
-                    text = session.badgeLabel,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                val isPiccSession = session.aidHex.equals("000000", ignoreCase = true)
-                Text(
-                    text = if (isPiccSession) {
-                        stringResource(R.string.card_session_detail_picc, session.keyNumber)
-                    } else {
-                        stringResource(
-                            R.string.card_session_detail,
-                            prettyAid(session.aidHex),
-                            session.keyNumber,
-                        )
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                )
-            } else {
-                Text(
-                    text = stringResource(R.string.card_session_none),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (selectedAid != null) {
-                    val isPicc = selectedAid.equals("000000", ignoreCase = true)
-                    Text(
-                        text = if (isPicc) {
-                            stringResource(R.string.card_session_selected_picc)
-                        } else {
-                            stringResource(R.string.card_session_selected_app, prettyAid(selectedAid))
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.card_session_select_app_first),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-        if (selectedAid != null) {
-            if (active) {
-                OutlinedButton(
-                    onClick = onOpenAuth,
-                    enabled = canAuth,
-                ) {
-                    Text(stringResource(R.string.card_auth_change))
-                }
-            } else {
-                Button(
-                    onClick = onOpenAuth,
-                    enabled = canAuth,
-                ) {
-                    Text(stringResource(R.string.card_auth_action))
-                }
-            }
-        }
-    }
-}
-
-/**
- * Formulaire auth en bottom sheet (U2 + K2 + U3).
- * Slot carte restreint aux [AuthKeyPlan.candidates] quand connus.
- * Matériau : coffre nommé **ou** hex (+ option enregistrer).
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AuthSheetContent(
-    authPlan: AuthKeyPlan,
-    initialKeyHex: String,
-    vaultEntries: List<KeyVaultEntryMeta>,
-    /** K4 : suggestion nom coffre (AID · kN · rôle). */
-    suggestSaveName: (keyNo: Int, roleHint: String?) -> String,
-    /** P2 : nom du profil actif (null = pas de profil). */
-    activeProfileName: String?,
-    busy: Boolean,
-    authenticated: Boolean,
-    selectedAid: String?,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onAuthenticate: (AuthMaterialRequest) -> Unit,
-) {
-    val clipboard = LocalClipboardManager.current
-    val preferred = (authPlan.preferKeyNo ?: 0).coerceIn(0, 13)
-    var draftKeyNo by remember(authPlan) { mutableIntStateOf(preferred) }
-    var draftKeyHex by remember {
-        mutableStateOf(initialKeyHex.replace(Regex("[^0-9a-fA-F]"), "").uppercase())
-    }
-    var useVault by remember { mutableStateOf(vaultEntries.isNotEmpty()) }
-    var selectedVaultId by remember {
-        mutableStateOf(vaultEntries.firstOrNull()?.id)
-    }
-    var vaultMenuExpanded by remember { mutableStateOf(false) }
-    var saveToVault by remember { mutableStateOf(false) }
-    var saveName by remember {
-        val role = authPlan.candidates.find { it.keyNo == preferred }?.roleLabel
-        mutableStateOf(suggestSaveName(preferred, role))
-    }
-    var saveNameTouched by remember { mutableStateOf(false) }
-    var bindToProfile by remember { mutableStateOf(false) }
-    var localError by remember { mutableStateOf<String?>(null) }
-    var showAllKeys by remember(authPlan) {
-        mutableStateOf(authPlan.candidates.isEmpty())
-    }
-    // Met à jour la suggestion si slot change et l’utilisateur n’a pas édité le nom
-    LaunchedEffect(draftKeyNo, selectedAid, authPlan) {
-        if (!saveNameTouched) {
-            val role = authPlan.candidates.find { it.keyNo == draftKeyNo }?.roleLabel
-            saveName = suggestSaveName(draftKeyNo, role)
-        }
-    }
-
-    val chips: List<Int> = when {
-        showAllKeys -> (0..13).toList()
-        authPlan.candidates.isNotEmpty() -> authPlan.candidates.map { it.keyNo }.distinct()
-        else -> (0..13).toList()
-    }
-
-    LaunchedEffect(vaultEntries) {
-        if (vaultEntries.isEmpty()) {
-            useVault = false
-            selectedVaultId = null
-        } else if (selectedVaultId == null || vaultEntries.none { it.id == selectedVaultId }) {
-            selectedVaultId = vaultEntries.first().id
-        }
-    }
-
-    fun applyKeyHex(raw: String) {
-        val clean = raw.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
-        when {
-            clean.length <= 32 -> {
-                draftKeyHex = clean
-                localError = null
-            }
-            else ->
-                localError = "Colle uniquement la clé AES (32 caractères hex), pas un journal APDU."
-        }
-    }
-
-    val selectedVaultName = vaultEntries.find { it.id == selectedVaultId }?.displayName
-    val canSubmit = !busy && selectedAid != null && when {
-        useVault -> selectedVaultId != null
-        else -> draftKeyHex.length == 32
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 24.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = authPlan.titleHint,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        if (selectedAid != null) {
-            val isPicc = selectedAid.equals("000000", ignoreCase = true)
-            Text(
-                text = if (isPicc) {
-                    stringResource(R.string.card_session_selected_picc)
-                } else {
-                    stringResource(R.string.card_session_selected_app, prettyAid(selectedAid))
-                },
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        authPlan.detailMessage?.let { detail ->
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        Text(
-            text = stringResource(R.string.card_auth_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        val displayError = localError ?: errorMessage
-        if (displayError != null) {
-            Text(
-                text = displayError,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        Text(
-            text = stringResource(R.string.card_key_no),
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            for (n in chips) {
-                val role = authPlan.candidates.find { it.keyNo == n }?.roleLabel
-                FilterChip(
-                    selected = draftKeyNo == n,
-                    onClick = { draftKeyNo = n },
-                    label = {
-                        Text(if (role != null && chips.size <= 4) "$n · $role" else "$n")
-                    },
-                    enabled = !busy,
-                )
-            }
-        }
-        if (authPlan.candidates.isNotEmpty()) {
-            TextButton(
-                onClick = { showAllKeys = !showAllKeys },
-                enabled = !busy,
-            ) {
-                Text(
-                    if (showAllKeys) {
-                        stringResource(R.string.card_auth_keys_candidates_only)
-                    } else {
-                        stringResource(R.string.card_auth_keys_show_all)
-                    },
-                )
-            }
-        }
-
-        Text(
-            text = stringResource(R.string.card_auth_material),
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(
-                selected = useVault,
-                onClick = { useVault = true },
-                enabled = !busy && vaultEntries.isNotEmpty(),
-            )
-            Text(
-                text = stringResource(R.string.card_auth_from_vault),
-                modifier = Modifier
-                    .clickable(enabled = !busy && vaultEntries.isNotEmpty()) { useVault = true }
-                    .padding(end = 12.dp),
-            )
-            RadioButton(
-                selected = !useVault,
-                onClick = { useVault = false },
-                enabled = !busy,
-            )
-            Text(
-                text = stringResource(R.string.card_auth_from_hex),
-                modifier = Modifier.clickable(enabled = !busy) { useVault = false },
-            )
-        }
-
-        if (useVault && vaultEntries.isNotEmpty()) {
-            ExposedDropdownMenuBox(
-                expanded = vaultMenuExpanded,
-                onExpandedChange = { if (!busy) vaultMenuExpanded = it },
-            ) {
-                OutlinedTextField(
-                    value = selectedVaultName.orEmpty(),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text(stringResource(R.string.vault_name)) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = vaultMenuExpanded) },
-                    modifier = Modifier
-                        .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = !busy)
-                        .fillMaxWidth(),
-                    enabled = !busy,
-                )
-                ExposedDropdownMenu(
-                    expanded = vaultMenuExpanded,
-                    onDismissRequest = { vaultMenuExpanded = false },
-                ) {
-                    vaultEntries.forEach { entry ->
-                        DropdownMenuItem(
-                            text = { Text(entry.displayName) },
-                            onClick = {
-                                selectedVaultId = entry.id
-                                vaultMenuExpanded = false
-                            },
-                        )
-                    }
-                }
-            }
-        } else {
-            if (vaultEntries.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.card_auth_vault_empty_hint),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            OutlinedTextField(
-                value = draftKeyHex,
-                onValueChange = { applyKeyHex(it) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.card_key_hex)) },
-                supportingText = {
-                    Text(
-                        stringResource(
-                            R.string.card_key_hex_support,
-                            draftKeyHex.length,
-                            groupHex(draftKeyHex).ifEmpty { "—" },
+        is OpenNodeMenu.File -> {
+            val node = menu.node
+            val rights = node.settings.accessRights
+            val readPlan = AuthKeyPlanner.plan(AuthIntent.ReadFile(node.fileNo, rights), sessionKey)
+            val writePlan = AuthKeyPlanner.plan(AuthIntent.WriteFile(node.fileNo, rights), sessionKey)
+            buildList {
+                if (node.dataHex == null && readPlan.barrier == AuthBarrier.NEEDS_KEY) {
+                    val keys = readPlan.candidates.joinToString(",") { "k${it.keyNo}" }
+                    add(
+                        NodeActionItem(
+                            stringResource(R.string.card_file_auth_to_read, keys.ifEmpty { "?" }),
+                            enabled = enabled,
+                            onClick = { onAuthFile(node) },
                         ),
                     )
-                },
-                singleLine = true,
-                enabled = !busy,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                ),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                TextButton(
-                    onClick = {
-                        draftKeyHex = Hex.encode(AesConstants.FACTORY_KEY)
-                        localError = null
-                    },
-                    enabled = !busy,
-                ) {
-                    Text(stringResource(R.string.card_key_factory))
                 }
-                TextButton(
-                    onClick = {
-                        val raw = clipboard.getText()?.text.orEmpty()
-                        if (raw.isNotBlank()) applyKeyHex(raw)
-                    },
-                    enabled = !busy,
-                ) {
-                    Text(stringResource(R.string.card_key_paste))
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = saveToVault,
-                    onCheckedChange = { saveToVault = it },
-                    enabled = !busy,
-                )
-                Text(stringResource(R.string.card_auth_save_vault))
-            }
-            if (saveToVault) {
-                OutlinedTextField(
-                    value = saveName,
-                    onValueChange = {
-                        saveName = it
-                        saveNameTouched = true
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.vault_name)) },
-                    supportingText = {
-                        Text(stringResource(R.string.vault_name_suggest_hint))
-                    },
-                    singleLine = true,
-                    enabled = !busy,
-                )
-            }
-        }
-
-        if (activeProfileName != null) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = bindToProfile,
-                    onCheckedChange = { bindToProfile = it },
-                    enabled = !busy,
-                )
-                Text(
-                    text = stringResource(R.string.card_auth_bind_profile, activeProfileName),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-
-        fun submit() {
-            if (useVault) {
-                val id = selectedVaultId ?: return
-                onAuthenticate(
-                    AuthMaterialRequest(
-                        keyNo = draftKeyNo,
-                        vaultEntryId = id,
-                        bindToActiveProfile = bindToProfile && activeProfileName != null,
-                    ),
-                )
-            } else {
-                if (draftKeyHex.length != 32) return
-                onAuthenticate(
-                    AuthMaterialRequest(
-                        keyNo = draftKeyNo,
-                        keyHex = draftKeyHex,
-                        saveAsVaultName = saveName.trim().takeIf { saveToVault && it.isNotEmpty() },
-                        bindToActiveProfile = bindToProfile && activeProfileName != null,
-                    ),
-                )
-            }
-        }
-
-        if (authenticated) {
-            OutlinedButton(
-                onClick = { submit() },
-                enabled = canSubmit,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                BusyLabel(busy = busy, text = stringResource(R.string.card_auth_again))
-            }
-        } else {
-            Button(
-                onClick = { submit() },
-                enabled = canSubmit,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                BusyLabel(busy = busy, text = stringResource(R.string.card_auth_action))
-            }
-        }
-        TextButton(
-            onClick = onDismiss,
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-/** Sheet d’écriture — [node] doit être le nœud **live** (recomposition après explore). */
-@Composable
-private fun WriteFileSheetContent(
-    node: FileNode,
-    busy: Boolean,
-    statusLine: String?,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onWrite: (hex: String, padToFileSize: Boolean) -> Unit,
-) {
-    val size = node.settings.sizeBytes
-    val current = node.dataHex.orEmpty()
-    var writeHex by remember(node.fileNo) {
-        mutableStateOf(current.ifEmpty { "00" })
-    }
-    // Met à jour le champ éditable quand le contenu carte change (après Write OK)
-    LaunchedEffect(current) {
-        if (!busy && current.isNotEmpty()) {
-            writeHex = current
-        }
-    }
-    var replaceAll by rememberSaveable(node.fileNo) { mutableStateOf(true) }
-    val nBytes = writeHex.length / 2
-    val tooLong = size != null && nBytes > size
-    val justWrote = statusLine?.startsWith("WriteData OK") == true && !busy
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_write_sheet_title, node.fileNo),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = buildString {
-                append(node.settings.summaryLabel)
-                append(" · W=")
-                append(node.settings.accessRights.writeLabel)
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(R.string.card_write_sheet_current),
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Text(
-            text = if (current.isNotEmpty()) {
-                prettyHex(current)
-            } else {
-                stringResource(R.string.card_write_sheet_current_empty)
-            },
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            color = if (justWrote) {
-                MaterialTheme.colorScheme.tertiary
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-        )
-        if (justWrote) {
-            Text(
-                text = statusLine.orEmpty(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
-        }
-        if (current.isNotEmpty()) {
-            TextButton(onClick = { writeHex = current }, enabled = !busy) {
-                Text(stringResource(R.string.card_write_sheet_use_current))
-            }
-        }
-        OutlinedTextField(
-            value = writeHex,
-            onValueChange = {
-                writeHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(104)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_write_sheet_hex)) },
-            supportingText = {
-                val sizeHint = size?.let { " · fichier ${it}o" }.orEmpty()
-                Text("$nBytes o$sizeHint")
-            },
-            isError = tooLong,
-            enabled = !busy,
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-        )
-        if (size != null) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = replaceAll,
-                    onCheckedChange = { replaceAll = it },
-                    enabled = !busy,
-                )
-                Text(
-                    text = stringResource(R.string.card_write_sheet_replace_all, size),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            if (!replaceAll && nBytes < size) {
-                Text(
-                    text = stringResource(R.string.card_write_sheet_partial_warn, nBytes, size),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-        if (errorMessage != null) {
-            Text(
-                text = errorMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        Button(
-            onClick = { onWrite(writeHex, replaceAll && size != null) },
-            enabled = !busy && writeHex.length >= 2 && writeHex.length % 2 == 0 && !tooLong,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BusyLabel(
-                busy = busy,
-                text = if (replaceAll && size != null) {
-                    stringResource(R.string.card_write_sheet_action_full)
-                } else {
-                    stringResource(R.string.card_write_sheet_action_partial, nBytes)
-                },
-            )
-        }
-        TextButton(
-            onClick = onDismiss,
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-@Composable
-private fun UpgradeAesSheetContent(
-    busy: Boolean,
-    statusLine: String?,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onUpgrade: (newAesKeyHex: String) -> Unit,
-) {
-    var keyHex by rememberSaveable {
-        mutableStateOf(Hex.encode(AesConstants.FACTORY_KEY))
-    }
-    val canSubmit = !busy && keyHex.length == 32
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_upgrade_aes_sheet_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = stringResource(R.string.card_upgrade_aes_sheet_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = keyHex,
-            onValueChange = {
-                keyHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(32)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_upgrade_aes_new_key)) },
-            supportingText = {
-                Text("${keyHex.length} / 32")
-            },
-            singleLine = true,
-            enabled = !busy,
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-        )
-        TextButton(
-            onClick = { keyHex = Hex.encode(AesConstants.FACTORY_KEY) },
-            enabled = !busy,
-        ) {
-            Text(stringResource(R.string.card_key_factory))
-        }
-        if (statusLine != null && busy) {
-            BusyLabel(busy = true, text = statusLine)
-        }
-        if (errorMessage != null) {
-            Text(errorMessage, color = MaterialTheme.colorScheme.error)
-        }
-        Button(
-            onClick = { onUpgrade(keyHex) },
-            enabled = canSubmit,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BusyLabel(busy = busy, text = stringResource(R.string.card_upgrade_aes_action))
-        }
-        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-@Composable
-private fun CreateAppSheetContent(
-    suggestedAidHex: String,
-    busy: Boolean,
-    statusLine: String?,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onCreate: (aidHex: String) -> Unit,
-) {
-    var aidHex by remember(suggestedAidHex) { mutableStateOf(suggestedAidHex) }
-    // Après Create OK, identity change → suggestion suivante
-    LaunchedEffect(suggestedAidHex) {
-        if (!busy) aidHex = suggestedAidHex
-    }
-    val justCreated = statusLine?.startsWith("CreateApplication OK") == true && !busy
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_create_app_sheet_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = stringResource(R.string.card_create_app_sheet_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = aidHex,
-            onValueChange = {
-                aidHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(6)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_lab_aid_hex)) },
-            supportingText = {
-                Text(stringResource(R.string.card_create_app_suggest, suggestedAidHex))
-            },
-            singleLine = true,
-            enabled = !busy,
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-        )
-        if (justCreated && statusLine != null) {
-            Text(
-                text = statusLine,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        if (errorMessage != null) {
-            Text(errorMessage, color = MaterialTheme.colorScheme.error)
-        }
-        Button(
-            onClick = { onCreate(aidHex) },
-            enabled = !busy && aidHex.length == 6,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BusyLabel(busy = busy, text = stringResource(R.string.card_lab_create_app_action))
-        }
-        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-@Composable
-private fun ChangeKeyAesSheetContent(
-    selectedAidHex: String?,
-    busy: Boolean,
-    statusLine: String?,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onChange: (keyNo: Int, newKeyHex: String) -> Unit,
-) {
-    var keyNoText by rememberSaveable { mutableStateOf("0") }
-    var keyHex by rememberSaveable {
-        mutableStateOf(Hex.encode(AesConstants.FACTORY_KEY))
-    }
-    val justOk = statusLine?.startsWith("ChangeKey AES OK") == true && !busy
-    val clean = keyHex.replace(Regex("[^0-9a-fA-F]"), "")
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_change_key_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = stringResource(
-                R.string.card_change_key_hint,
-                prettyAid(selectedAidHex ?: "—"),
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = keyNoText,
-            onValueChange = { keyNoText = it.filter { c -> c.isDigit() }.take(2) },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_change_key_slot)) },
-            singleLine = true,
-            enabled = !busy,
-        )
-        OutlinedTextField(
-            value = keyHex,
-            onValueChange = {
-                keyHex = it.replace(Regex("[^0-9a-fA-F]"), "").uppercase().take(32)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_upgrade_aes_new_key)) },
-            supportingText = { Text("${clean.length} / 32") },
-            singleLine = true,
-            enabled = !busy,
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-        )
-        TextButton(
-            onClick = { keyHex = Hex.encode(AesConstants.FACTORY_KEY) },
-            enabled = !busy,
-        ) {
-            Text(stringResource(R.string.card_key_factory))
-        }
-        if (justOk && statusLine != null) {
-            Text(
-                text = statusLine,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        if (statusLine != null && busy) {
-            BusyLabel(busy = true, text = statusLine)
-        }
-        if (errorMessage != null) {
-            Text(errorMessage, color = MaterialTheme.colorScheme.error)
-        }
-        Button(
-            onClick = {
-                onChange(keyNoText.toIntOrNull()?.coerceIn(0, 13) ?: 0, clean)
-            },
-            enabled = !busy && clean.length == 32,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BusyLabel(busy = busy, text = stringResource(R.string.card_change_key_action))
-        }
-        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-@Composable
-private fun RestoreDumpSheetContent(
-    dumpNames: List<String>,
-    busy: Boolean,
-    statusLine: String?,
-    errorMessage: String?,
-    previewLines: List<String>,
-    previewWarnings: List<String>,
-    selectedFileName: String?,
-    onDismiss: () -> Unit,
-    onPreview: (fileName: String, formatFirst: Boolean) -> Unit,
-    onExecute: (fileName: String, formatFirst: Boolean) -> Unit,
-) {
-    var selected by remember {
-        mutableStateOf(selectedFileName ?: dumpNames.firstOrNull().orEmpty())
-    }
-    var formatFirst by rememberSaveable { mutableStateOf(false) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_restore_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = stringResource(R.string.card_restore_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (dumpNames.isEmpty()) {
-            Text(
-                text = stringResource(R.string.dumps_empty),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            Text(
-                text = stringResource(R.string.card_restore_pick),
-                style = MaterialTheme.typography.labelMedium,
-            )
-            dumpNames.take(12).forEach { name ->
-                FilterChip(
-                    selected = selected == name,
-                    onClick = { selected = name },
-                    label = {
-                        Text(
-                            text = name,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                        )
-                    },
-                    enabled = !busy,
-                )
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = formatFirst,
-                onCheckedChange = { formatFirst = it },
-                enabled = !busy,
-            )
-            Text(
-                text = stringResource(R.string.card_restore_format_first),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        if (previewWarnings.isNotEmpty()) {
-            previewWarnings.forEach { w ->
-                Text(
-                    text = "· $w",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-            }
-        }
-        if (previewLines.isNotEmpty()) {
-            Text(
-                text = stringResource(R.string.card_restore_plan, previewLines.size),
-                style = MaterialTheme.typography.labelMedium,
-            )
-            previewLines.take(40).forEach { line ->
-                Text(
-                    text = "· $line",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-            if (previewLines.size > 40) {
-                Text("… +${previewLines.size - 40}", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-        if (statusLine != null && busy) {
-            BusyLabel(busy = true, text = statusLine)
-        }
-        if (statusLine != null && !busy && statusLine.startsWith("Restore")) {
-            Text(
-                text = statusLine,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        if (errorMessage != null) {
-            Text(errorMessage, color = MaterialTheme.colorScheme.error)
-        }
-        OutlinedButton(
-            onClick = { if (selected.isNotEmpty()) onPreview(selected, formatFirst) },
-            enabled = !busy && selected.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.card_restore_dry_run))
-        }
-        Button(
-            onClick = { if (selected.isNotEmpty()) onExecute(selected, formatFirst) },
-            enabled = !busy && selected.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BusyLabel(busy = busy, text = stringResource(R.string.card_restore_execute))
-        }
-        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-@Composable
-private fun CreateFileSheetContent(
-    suggestedFileNo: Int,
-    busy: Boolean,
-    statusLine: String?,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onCreate: (fileNo: Int, size: Int) -> Unit,
-) {
-    // Pas de rememberSaveable : sinon le n° reste collé à 0 après un Create OK.
-    var fileNoText by remember(suggestedFileNo) { mutableStateOf(suggestedFileNo.toString()) }
-    var sizeText by rememberSaveable { mutableStateOf("16") }
-    // Après Create OK, explore met à jour les files → suggestion = prochain libre.
-    LaunchedEffect(suggestedFileNo) {
-        if (!busy) fileNoText = suggestedFileNo.toString()
-    }
-    val justCreated = statusLine?.startsWith("CreateStdDataFile OK") == true && !busy
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.card_create_file_sheet_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = stringResource(R.string.card_create_file_sheet_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = fileNoText,
-            onValueChange = { fileNoText = it.filter { c -> c.isDigit() }.take(2) },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_lab_file_no)) },
-            supportingText = {
-                Text(stringResource(R.string.card_create_file_suggest, suggestedFileNo))
-            },
-            singleLine = true,
-            enabled = !busy,
-        )
-        OutlinedTextField(
-            value = sizeText,
-            onValueChange = { sizeText = it.filter { c -> c.isDigit() }.take(4) },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(stringResource(R.string.card_lab_file_size)) },
-            singleLine = true,
-            enabled = !busy,
-        )
-        if (justCreated && statusLine != null) {
-            Text(
-                text = statusLine,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        if (statusLine != null && busy) {
-            BusyLabel(busy = true, text = statusLine)
-        }
-        if (errorMessage != null) {
-            Text(errorMessage, color = MaterialTheme.colorScheme.error)
-        }
-        Button(
-            onClick = {
-                onCreate(fileNoText.toIntOrNull() ?: suggestedFileNo, sizeText.toIntOrNull() ?: 16)
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            BusyLabel(busy = busy, text = stringResource(R.string.card_create_file_sheet_action))
-        }
-        TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.card_auth_cancel))
-        }
-    }
-}
-
-@Composable
-private fun ProfileSummaryCard(
-    identity: CardIdentity,
-    realUidHex: String?,
-) {
-    val version = identity.version
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.card_identity_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            val typeLine = if (version != null) {
-                stringResource(
-                    R.string.card_profile_type_sw,
-                    identity.typeLabel,
-                    version.softwareVersionLabel,
-                )
-            } else {
-                identity.typeLabel
-            }
-            Text(
-                text = typeLine,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-            )
-
-            val uidText = buildString {
-                append(identity.displayUid)
-                if (identity.uidKind == UidKind.RANDOM) {
-                    append(" · ")
-                    append("Random ID")
-                }
-            }
-            ProfileField(
-                label = stringResource(R.string.card_uid),
-                value = uidText,
-            )
-            if (realUidHex != null) {
-                ProfileField(
-                    label = stringResource(R.string.card_uid_real),
-                    value = realUidHex,
-                )
-            }
-            ProfileField(
-                label = stringResource(R.string.card_memory),
-                value = identity.memoryLabel,
-            )
-            if (version != null) {
-                ProfileField(
-                    label = stringResource(R.string.card_production),
-                    value = version.productionLabel,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProfileField(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
-    }
-}
-
-@Composable
-private fun VersionTechnicalSection(version: VersionInfo) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val rows = version.technicalDetailRows()
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        ),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (expanded) {
-                        stringResource(R.string.card_raw_fields_hide)
-                    } else {
-                        stringResource(R.string.card_raw_fields_show)
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.card_raw_fields),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (writePlan.barrier != AuthBarrier.NEVER) {
+                    add(
+                        NodeActionItem(
+                            stringResource(R.string.card_file_write_action),
+                            enabled = enabled && structureEnabled,
+                            onClick = { onWriteFile(node) },
+                        ),
                     )
-                    for (row in rows) {
-                        TechnicalRow(label = row.first, value = row.second)
-                    }
                 }
+                add(
+                    NodeActionItem(
+                        stringResource(R.string.card_file_delete_action),
+                        destructive = true,
+                        enabled = enabled && structureEnabled,
+                        onClick = { onDeleteFile(node) },
+                    ),
+                )
             }
-        }
-    }
-}
-
-@Composable
-private fun TechnicalRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(148.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun AuthSuccessFlash(visible: Boolean, message: String) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn() + scaleIn(initialScale = 0.92f),
-        exit = fadeOut() + scaleOut(targetScale = 0.96f),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.size(22.dp),
-            )
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-        }
-    }
-}
-
-/** Groupes de 4 hex pour saisie lisible (affichage seulement). */
-private fun groupHex(compact: String): String {
-    val clean = compact.replace(Regex("[^0-9a-fA-F]"), "").uppercase()
-    return clean.chunked(4).joinToString(" ")
-}
-
-@Composable
-private fun NotesSection(notes: List<String>) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = stringResource(R.string.card_notes),
-            style = MaterialTheme.typography.labelLarge,
-        )
-        for (note in notes) {
-            Text(
-                text = "· $note",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun WaitingCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Nfc,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = stringResource(R.string.card_waiting),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(R.string.card_place_hint),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = stringResource(R.string.card_keep_on_antenna),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
         }
     }
 }

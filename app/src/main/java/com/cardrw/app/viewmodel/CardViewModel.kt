@@ -12,7 +12,9 @@ import com.cardrw.app.data.model.KeyVaultEntryMeta
 import com.cardrw.app.data.model.MaterialRef
 import com.cardrw.app.data.repository.AidNameRepository
 import com.cardrw.app.data.repository.ApduJournalRepository
+import com.cardrw.app.data.repository.DumpCoveragePlanner
 import com.cardrw.app.data.repository.DumpRepository
+import com.cardrw.app.data.repository.RestoreMaterialPlanner
 import com.cardrw.app.data.repository.KeyMaterialResolver
 import com.cardrw.app.data.repository.KeyProfileCapture
 import com.cardrw.app.data.repository.KeyProfileRepository
@@ -57,124 +59,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
-
-data class CardUiState(
-    val phase: CardPhase = CardPhase.Waiting,
-    val identity: CardIdentity? = null,
-    val selectedAidHex: String? = null,
-    val authSession: AuthSession? = null,
-    val keyNo: Int = 0,
-    /** Hex compact 32 chars (sans espaces) — l’UI peut grouper à l’affichage. */
-    val keyHex: String = Hex.encode(AesConstants.FACTORY_KEY),
-    val explore: ApplicationExploreResult? = null,
-    /**
-     * Cache multi-AID pour l’arbre moniteur (U4) : clés = AID hex uppercase.
-     * Les apps déjà visitées restent visibles repliées avec leur dernier directory.
-     */
-    val exploreByAid: Map<String, ApplicationExploreResult> = emptyMap(),
-    /** UID réel via GetCardUID (après auth), si Random ID. */
-    val realUidHex: String? = null,
-    val busy: Boolean = false,
-    val errorMessage: String? = null,
-    /** Message d’opération court (pas de doublon avec le profil). */
-    val statusLine: String? = null,
-    val tagPresent: Boolean = false,
-    /**
-     * Flash sobre d’auth réussie — texte via [authSuccessMessage] ; auto-clear après délai.
-     */
-    val authSuccessFlash: Boolean = false,
-    /** Message du flash (défaut vs manuel). */
-    val authSuccessMessage: String? = null,
-    /**
-     * Incrémenté pour demander l’ouverture de la sheet auth (échec auto-auth silencieux).
-     */
-    val openAuthSheetNonce: Long = 0L,
-    /**
-     * Plan à présenter dans la sheet (lecture / écriture / générique) quand l’auto-auth échoue.
-     */
-    val pendingAuthPlan: AuthKeyPlan? = null,
-    /**
-     * Ouvrir la sheet Write une fois la session d’écriture prête (auth auto intention Write).
-     */
-    val pendingWriteFileNo: Int? = null,
-    /**
-     * Dernier dump exporté (JSON) — UI peut copier / partager.
-     */
-    val lastDumpJson: String? = null,
-    val lastDumpFileName: String? = null,
-    /**
-     * Dry-run restore (CDC §8.5) — lignes + warnings pour sheet UI.
-     */
-    val restorePreviewLines: List<String> = emptyList(),
-    val restorePreviewWarnings: List<String> = emptyList(),
-    val restorePreviewFileName: String? = null,
-    /**
-     * Proposition d’enregistrer le matériau hex malgré un échec d’auth
-     * (ex. bon secret, mauvais slot carte). Non null → dialog UI.
-     */
-    val pendingVaultSave: PendingVaultSaveOffer? = null,
-    /** P2 : profil actif (null = moniteur labo sans profil). */
-    val activeProfileId: String? = null,
-    val activeProfileName: String? = null,
-    /** Liste légère pour sheet sélection moniteur. */
-    val profileSummaries: List<ProfileSummary> = emptyList(),
-    /** P3 : slots mémorisés session (pour activer « Enregistrer ce jeu »). */
-    val rememberedSlotCount: Int = 0,
-    /** P3 : preview capture ouverte (null = fermé). */
-    val capturePreview: CapturePreviewUi? = null,
-)
-
-/** P3 : ligne de la sheet capture (sans secret). */
-data class CaptureSlotUi(
-    val selectionKey: String,
-    val label: String,
-    val sourceLabel: String,
-    val selected: Boolean,
-)
-
-/** P3 : état sheet « Enregistrer ce jeu ». */
-data class CapturePreviewUi(
-    val suggestedName: String,
-    val slots: List<CaptureSlotUi>,
-    val vaultCreatesNeeded: Int,
-)
-
-/** Entrée liste sélection profil moniteur (P2). */
-data class ProfileSummary(
-    val id: String,
-    val displayName: String,
-    val bindingCount: Int,
-)
-
-/**
- * Offre d’enregistrement coffre après auth refusée (matériau en mémoire VM uniquement).
- */
-data class PendingVaultSaveOffer(
-    val displayName: String,
-    /** Hex 32 pour affichage masqué / debug UI si besoin. */
-    val keyHexMasked: String = "••••••••",
-)
-
-enum class CardPhase {
-    Waiting,
-    Reading,
-    Ready,
-    Error,
-}
-
-/**
- * Auth AES réussie mémorisée pour un slot carte (session VM uniquement).
- * Plusieurs slots peuvent coexister par AID (ex. clé 2 lecture F0/F1, clé 3 lecture F2).
- */
-data class RememberedAppAuth(
-    val keyNo: Int,
-    /** Si non null, on reprend le matériau du coffre en priorité. */
-    val vaultEntryId: String? = null,
-    /** Copie session du secret (wipe à la pose d’une nouvelle carte / reset). */
-    val keyBytes: ByteArray,
-) {
-    fun copyMaterial(): ByteArray = keyBytes.copyOf()
-}
 
 @HiltViewModel
 class CardViewModel @Inject constructor(
@@ -506,8 +390,41 @@ class CardViewModel @Inject constructor(
     /**
      * Export dump moniteur (structure + données lues, **sans secrets**) →
      * fichier local `filesDir/dumps` + JSON en mémoire pour copie presse-papiers.
+     * Alias P4 : dump **rapide** (pas d’auth supplémentaire).
      */
-    fun exportMonitorDump() {
+    fun exportMonitorDump() = exportDump(DumpMode.QUICK)
+
+    /** P4 : dry-run couverture (cache + profil, **sans NFC**). */
+    fun previewDumpCoverage() {
+        val identity = _ui.value.identity
+        if (identity == null) {
+            _ui.update { it.copy(errorMessage = "Aucune carte lue — pose une carte d’abord.") }
+            return
+        }
+        val plan = currentDumpCoveragePlan(identity.applications.map { it.hex })
+        _ui.update {
+            it.copy(
+                dumpCoverage = DumpCoverageUi(
+                    profileName = plan.profileName,
+                    summary = plan.summaryLine(),
+                    lines = plan.toLines(),
+                    missingCount = plan.missingCount,
+                    expectedReadable = plan.expectedReadable,
+                ),
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun clearDumpCoverage() {
+        _ui.update { it.copy(dumpCoverage = null) }
+    }
+
+    /**
+     * P4 : [DumpMode.QUICK] = cache actuel ;
+     * [DumpMode.COMPLETE] = visite PICC + apps (auth profil / mémorisée / usine, **sans sheet**).
+     */
+    fun exportDump(mode: DumpMode) {
         val identity = _ui.value.identity
         if (identity == null) {
             _ui.update { it.copy(errorMessage = "Aucune carte lue — pose une carte d’abord.") }
@@ -515,19 +432,42 @@ class CardViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _ui.update {
-                it.copy(busy = true, errorMessage = null, statusLine = "Export dump…")
+                it.copy(busy = true, errorMessage = null, statusLine = when (mode) {
+                    DumpMode.QUICK -> "Export dump rapide…"
+                    DumpMode.COMPLETE -> "Dump complet — auth multi-slots…"
+                })
             }
             try {
+                if (mode == DumpMode.COMPLETE) {
+                    val aids = buildList {
+                        add("000000")
+                        addAll(identity.applications.map { it.hex.uppercase() })
+                    }.distinct()
+                    for (aid in aids) {
+                        if (liveClient == null) {
+                            _ui.update {
+                                it.copy(statusLine = "Dump partiel — carte perdue après $aid")
+                            }
+                            break
+                        }
+                        silentVisitAidForDump(aid)
+                    }
+                }
+                val latestIdentity = _ui.value.identity ?: identity
+                val coverage = currentDumpCoveragePlan(latestIdentity.applications.map { it.hex })
                 val doc = CardDumpBuilder.build(
-                    identity = identity,
+                    identity = latestIdentity,
                     exploreByAid = _ui.value.exploreByAid,
                     realUidHex = _ui.value.realUidHex,
                     appVersion = BuildConfig.VERSION_NAME,
                     friendlyName = { aidNames.nameFor(it) },
+                    dumpMode = if (mode == DumpMode.COMPLETE) "complete" else "quick",
+                    profileName = coverage.profileName,
+                    coverageLines = coverage.toLines(),
                 )
                 val json = CardDumpBuilder.toPrettyJson(doc)
                 val item = withContext(Dispatchers.IO) {
-                    dumpRepository.save(doc, uidHint = identity.displayUid)
+                    dumpRepository.save(doc, uidHint = latestIdentity.displayUid)
                 }
                 val unread = doc.structure.unreadFiles.size
                 val dataCount = doc.data.files.size
@@ -536,6 +476,13 @@ class CardViewModel @Inject constructor(
                         busy = false,
                         lastDumpJson = json,
                         lastDumpFileName = item.fileName,
+                        dumpCoverage = DumpCoverageUi(
+                            profileName = coverage.profileName,
+                            summary = coverage.summaryLine(),
+                            lines = coverage.toLines(),
+                            missingCount = coverage.missingCount,
+                            expectedReadable = coverage.expectedReadable,
+                        ),
                         statusLine = "Dump OK — ${item.fileName} · " +
                             "${doc.structure.applications.size} app(s) · $dataCount fichier(s) lu(s)" +
                             if (unread > 0) " · $unread non lu(s)" else "",
@@ -552,6 +499,66 @@ class CardViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun currentDumpCoveragePlan(applicationAids: List<String>): DumpCoveragePlanner.Plan {
+        val remembered = rememberedKeysByAid.mapValues { it.value.keys.toSet() }
+        return DumpCoveragePlanner.plan(
+            applicationAids = applicationAids,
+            exploreByAid = _ui.value.exploreByAid,
+            profile = activeProfileOrNull(),
+            rememberedByAid = remembered,
+            knownVaultIds = keyVault.entries.value.map { it.id }.toSet(),
+            includePicc = true,
+        )
+    }
+
+    /**
+     * P4 : select + auth auto (mémorisée → profil → usine) **sans** ouvrir la sheet.
+     * Best-effort : une app KO n’arrête pas le dump.
+     */
+    private suspend fun silentVisitAidForDump(aidHex: String) {
+        val cacheKey = aidHex.uppercase()
+        _ui.update {
+            it.copy(
+                selectedAidHex = aidHex,
+                explore = it.exploreByAid[cacheKey],
+                authSession = null,
+                busy = true,
+                errorMessage = null,
+                statusLine = if (cacheKey == "000000") {
+                    "Dump · PICC…"
+                } else {
+                    "Dump · app $cacheKey…"
+                },
+                authSuccessFlash = false,
+            )
+        }
+        val selected = withContext(Dispatchers.IO) {
+            withLiveClient { client ->
+                client.ensureApplicationSelected(Aid.fromHex(aidHex))
+                client.authSession
+            }
+        }
+        if (selected.isFailure) {
+            syncJournal()
+            return
+        }
+        _ui.update { it.copy(authSession = null) }
+        syncJournal()
+        if (tryRememberedAuthThenExplore(aidHex)) return
+        if (tryProfileAuthThenExplore(aidHex)) return
+        if (KeyMaterialResolver.allowsFactoryFallback(activeProfileOrNull()) &&
+            tryFactoryAuthThenExplore(
+                aidHex = aidHex,
+                keyNo = DEFAULT_AUTH_KEY_NO,
+                flashMessage = null,
+                fillAfter = true,
+            )
+        ) {
+            return
+        }
+        runExplore(aidHex, fillRemembered = true)
     }
 
     fun reloadVault() {
@@ -1160,75 +1167,38 @@ class CardViewModel @Inject constructor(
                 selectedAidHex = "000000",
             )
         }
-        // Mémorisée PICC clé 0 (AES only)
-        val remembered = rememberedKeysByAid["000000"]?.get(0)
-        if (remembered != null) {
+        // P5 : mémorisée → profil → usine (si autorisée)
+        val piccReady = resolveSlotMaterial("000000", 0)
+        if (piccReady != null) {
             val ok = silentAuthThenExplore(
                 aidHex = "000000",
-                remembered = remembered,
-                flashMessage = authFlashMessage("000000", 0, "mémorisée"),
+                remembered = RememberedAppAuth(
+                    keyNo = 0,
+                    vaultEntryId = piccReady.vaultEntryId,
+                    keyBytes = piccReady.copyKey(),
+                ),
+                flashMessage = authFlashMessage(
+                    "000000",
+                    0,
+                    KeyMaterialResolver.sourceLabel(piccReady.source),
+                ),
                 fillRemembered = false,
                 allowDesFactoryFallback = false,
             )
             if (ok && liveClientHasPiccMasterAes()) return true
         }
-        // Usine AES (sans fallback DES — on gère la bascule explicitement)
-        val keyBytes = AesConstants.FACTORY_KEY.copyOf()
-        val result = withContext(Dispatchers.IO) {
-            withLiveClient { client ->
-                client.ensureApplicationSelected(Aid.PICC)
-                client.authenticateAesPreferEv1(
-                    keyNo = 0,
-                    key = keyBytes,
-                    aidHex = "000000",
-                    allowDesFactoryFallback = false,
-                )
-                client.authSession
-            }
+        if (KeyMaterialResolver.allowsFactoryFallback(activeProfileOrNull())) {
+            if (upgradeDesPiccMasterToAesFactory()) return true
         }
-        return result.fold(
-            onSuccess = { session ->
-                if (session != null &&
-                    session.smLevel != SecureMessagingLevel.DES_LEGACY &&
-                    session.smLevel != SecureMessagingLevel.NONE
-                ) {
-                    rememberAuth("000000", 0, keyBytes, vaultEntryId = null)
-                    _ui.update {
-                        it.copy(
-                            authSession = session,
-                            selectedAidHex = "000000",
-                            errorMessage = null,
-                            statusLine = null,
-                        )
-                    }
-                    syncJournal()
-                    showAuthSuccessFlash(authFlashMessage("000000", 0, "usine"))
-                    true
-                } else {
-                    // AES a répondu mais session DES ? bascule
-                    upgradeDesPiccMasterToAesFactory()
-                }
-            },
-            onFailure = { e ->
-                syncJournal()
-                // AE / auth fail sur blank → tenter DES→AES auto
-                val tryDesUpgrade = e is DesfireProtocolException ||
-                    e.message?.contains("auth", ignoreCase = true) == true
-                if (tryDesUpgrade && upgradeDesPiccMasterToAesFactory()) {
-                    true
-                } else {
-                    _ui.update {
-                        it.copy(
-                            busy = false,
-                            authSession = null,
-                            errorMessage = "Auth PICC master AES requise : ${e.message}. " +
-                                "Bascule DES→AES auto a aussi échoué (master non usine ?).",
-                        )
-                    }
-                    false
-                }
-            },
-        )
+        _ui.update {
+            it.copy(
+                busy = false,
+                authSession = null,
+                errorMessage = "Auth PICC master AES requise " +
+                    "(profil / mémorisée / usine). Master non usine ? Compléter le profil.",
+            )
+        }
+        return false
     }
 
     /**
@@ -2384,11 +2354,15 @@ class CardViewModel @Inject constructor(
                     ?: error("Dump introuvable : $fileName")
                 val doc = CardDumpBuilder.parseJson(json)
                 val plan = DumpRestorePlanner.plan(doc, mode, formatFirst)
+                val materials = restoreMaterialReport(plan)
                 _ui.update {
                     it.copy(
                         restorePreviewFileName = fileName,
                         restorePreviewLines = plan.steps.map { s -> s.label },
                         restorePreviewWarnings = plan.warnings,
+                        restoreMaterialLines = materials.checks.map { it.line },
+                        restoreMaterialSummary = materials.summaryLine(),
+                        restoreMaterialBlocking = materials.blockingCount > 0,
                         errorMessage = null,
                         statusLine = "Dry-run restore : ${plan.actionableCount} op(s) · $fileName",
                     )
@@ -2412,8 +2386,21 @@ class CardViewModel @Inject constructor(
                 restorePreviewLines = emptyList(),
                 restorePreviewWarnings = emptyList(),
                 restorePreviewFileName = null,
+                restoreMaterialLines = emptyList(),
+                restoreMaterialSummary = null,
+                restoreMaterialBlocking = false,
             )
         }
+    }
+
+    private fun restoreMaterialReport(plan: DumpRestorePlanner.Plan): RestoreMaterialPlanner.Report {
+        val remembered = rememberedKeysByAid.mapValues { it.value.keys.toSet() }
+        return RestoreMaterialPlanner.check(
+            plan = plan,
+            profile = activeProfileOrNull(),
+            rememberedByAid = remembered,
+            knownVaultIds = keyVault.entries.value.map { it.id }.toSet(),
+        )
     }
 
     /**
@@ -2439,6 +2426,27 @@ class CardViewModel @Inject constructor(
                     ?: error("Dump introuvable : $fileName")
                 val doc = CardDumpBuilder.parseJson(json)
                 val plan = DumpRestorePlanner.plan(doc, mode, formatFirst)
+                val materials = restoreMaterialReport(plan)
+                _ui.update {
+                    it.copy(
+                        restoreMaterialLines = materials.checks.map { c -> c.line },
+                        restoreMaterialSummary = materials.summaryLine(),
+                        restoreMaterialBlocking = materials.blockingCount > 0,
+                    )
+                }
+                if (materials.blockingCount > 0) {
+                    _ui.update {
+                        it.copy(
+                            busy = false,
+                            errorMessage = materials.summaryLine() +
+                                " — complète le profil (PICC / master app) avant d’exécuter.",
+                            restorePreviewFileName = fileName,
+                            restorePreviewLines = plan.steps.map { s -> s.label },
+                            restorePreviewWarnings = plan.warnings,
+                        )
+                    }
+                    return@launch
+                }
                 val errors = mutableListOf<String>()
                 var done = 0
 
@@ -2728,8 +2736,8 @@ class CardViewModel @Inject constructor(
     }
 
     /**
-     * Auth AES sur [aidHex] en essayant les slots [preferredKeyNos] (mémorisé puis usine).
-     * Vérifie la session **live** (Select tue la SM).
+     * Auth AES sur [aidHex] en essayant les slots [preferredKeyNos]
+     * (mémorisée → profil → usine si autorisée). Select tue la SM.
      */
     private suspend fun ensureAppSlotAesSession(
         aidHex: String,
@@ -2767,66 +2775,49 @@ class CardViewModel @Inject constructor(
         }
 
         for (keyNo in slots) {
-            val remembered = rememberedKeysByAid[aid]?.get(keyNo)
-            if (remembered != null) {
-                val ok = silentAuthThenExplore(
-                    aidHex = aid,
-                    remembered = remembered,
-                    flashMessage = null,
-                    fillRemembered = false,
-                    allowDesFactoryFallback = false,
-                )
-                if (ok) {
-                    val after = _ui.value.authSession
-                    if (after?.keyNumber == keyNo &&
-                        after.smLevel != SecureMessagingLevel.DES_LEGACY
-                    ) {
-                        return true
-                    }
-                }
-            }
-            // Usine 00…00 sur ce slot
-            val keyBytes = AesConstants.FACTORY_KEY.copyOf()
-            val result = withContext(Dispatchers.IO) {
-                withLiveClient { client ->
-                    client.ensureApplicationSelected(Aid.fromHex(aid))
-                    // Select a pu tuer une ancienne session
-                    client.authenticateAesPreferEv1(
-                        keyNo = keyNo,
-                        key = keyBytes,
-                        aidHex = aid,
-                        allowDesFactoryFallback = false,
-                    )
-                    client.authSession
-                }
-            }
-            val ok = result.fold(
-                onSuccess = { session ->
-                    if (session == null ||
-                        session.smLevel == SecureMessagingLevel.DES_LEGACY
-                    ) {
-                        false
-                    } else {
-                        rememberAuth(aid, keyNo, keyBytes, vaultEntryId = null)
-                        _ui.update {
-                            it.copy(
-                                authSession = session,
-                                selectedAidHex = aid,
-                                errorMessage = null,
-                            )
-                        }
-                        syncJournal()
-                        true
-                    }
-                },
-                onFailure = {
-                    syncJournal()
-                    false
-                },
+            val ready = resolveSlotMaterial(aid, keyNo) ?: continue
+            val ok = silentAuthThenExplore(
+                aidHex = aid,
+                remembered = RememberedAppAuth(
+                    keyNo = keyNo,
+                    vaultEntryId = ready.vaultEntryId,
+                    keyBytes = ready.copyKey(),
+                ),
+                flashMessage = null,
+                fillRemembered = false,
+                allowDesFactoryFallback = false,
             )
-            if (ok) return true
+            if (ok) {
+                val after = _ui.value.authSession
+                if (after?.keyNumber == keyNo &&
+                    after.smLevel != SecureMessagingLevel.DES_LEGACY
+                ) {
+                    return true
+                }
+            }
         }
         return false
+    }
+
+    /**
+     * P5 : matériau pour un slot — mémorisée → binding profil → usine si autorisée.
+     */
+    private suspend fun resolveSlotMaterial(
+        aidHex: String,
+        keyNo: Int,
+    ): KeyMaterialResolver.ResolveResult.Ready? {
+        val aid = aidHex.uppercase()
+        val remembered = rememberedKeysByAid[aid]?.get(keyNo)
+        val result = KeyMaterialResolver.resolve(
+            scope = KeyMaterialResolver.scopeForAid(aid),
+            keyNo = keyNo,
+            profile = activeProfileOrNull(),
+            rememberedMaterial = remembered?.copyMaterial(),
+            rememberedVaultId = remembered?.vaultEntryId,
+            knownVaultIds = keyVault.entries.value.map { it.id }.toSet(),
+            loadVault = { id -> keyVault.material(id) },
+        )
+        return result as? KeyMaterialResolver.ResolveResult.Ready
     }
 
     /** CreateStdDataFile labo (FULL, droits Free 0xEEEE par défaut). */

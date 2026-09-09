@@ -68,6 +68,67 @@ object KeyMaterialResolver {
     fun allowsFactoryFallback(profile: KeyProfile?): Boolean =
         profile == null || profile.allowFactoryFallback
 
+    enum class PreviewSource {
+        REMEMBERED,
+        PROFILE,
+        FACTORY,
+        MISSING,
+    }
+
+    data class Preview(
+        val ready: Boolean,
+        val source: PreviewSource,
+        val detail: String,
+        val required: Boolean = false,
+    )
+
+    /**
+     * Dry-run matériau (P4/P5) — **sans** charger les octets du coffre.
+     * VaultEntry = ready ssi [knownVaultIds] contient l’id.
+     */
+    fun preview(
+        scope: BindingScope,
+        keyNo: Int,
+        profile: KeyProfile?,
+        remembered: Boolean,
+        knownVaultIds: Set<String> = emptySet(),
+    ): Preview {
+        require(KeyProfileRules.isValidKeyNo(keyNo)) { "keyNo 0–13" }
+        if (remembered) {
+            return Preview(true, PreviewSource.REMEMBERED, "mémorisée")
+        }
+        if (profile != null) {
+            val binding = findBinding(profile, scope, keyNo)
+            if (binding != null) {
+                return when (val ref = binding.materialRef) {
+                    is MaterialRef.FactoryZero ->
+                        Preview(true, PreviewSource.FACTORY, "usine (profil)", binding.required)
+                    is MaterialRef.VaultEntry -> {
+                        if (ref.vaultId in knownVaultIds) {
+                            Preview(true, PreviewSource.PROFILE, "coffre", binding.required)
+                        } else {
+                            Preview(
+                                false,
+                                PreviewSource.MISSING,
+                                "entrée coffre manquante",
+                                required = binding.required,
+                            )
+                        }
+                    }
+                }
+            }
+            if (profile.allowFactoryFallback) {
+                return Preview(true, PreviewSource.FACTORY, "usine (fallback)")
+            }
+            return Preview(
+                false,
+                PreviewSource.MISSING,
+                "pas de binding ${KeyProfileRules.formatScope(scope)} k$keyNo",
+            )
+        }
+        return Preview(true, PreviewSource.FACTORY, "usine (labo)")
+    }
+
     /**
      * Résolution moniteur pour un slot précis.
      *

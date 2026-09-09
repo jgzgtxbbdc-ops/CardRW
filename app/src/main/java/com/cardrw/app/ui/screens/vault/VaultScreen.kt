@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,7 +64,8 @@ import java.util.Date
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
+    showTopBar: Boolean = true,
     viewModel: VaultViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
@@ -88,28 +91,37 @@ fun VaultScreen(
     }
 
     Scaffold(
+        contentWindowInsets = if (showTopBar) {
+            ScaffoldDefaults.contentWindowInsets
+        } else {
+            WindowInsets(0, 0, 0, 0)
+        },
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.vault_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
-                    }
-                },
-                actions = {
-                    if (ui.entries.isNotEmpty()) {
-                        IconButton(
-                            onClick = { viewModel.prepareMetaExport() },
-                            enabled = !ui.busy,
-                        ) {
-                            Icon(
-                                Icons.Outlined.Share,
-                                contentDescription = stringResource(R.string.vault_export_meta),
-                            )
+            if (showTopBar) {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.vault_title)) },
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back))
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                    actions = {
+                        if (ui.entries.isNotEmpty()) {
+                            IconButton(
+                                onClick = { viewModel.prepareMetaExport() },
+                                enabled = !ui.busy,
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Share,
+                                    contentDescription = stringResource(R.string.vault_export_meta),
+                                )
+                            }
+                        }
+                    },
+                )
+            }
         },
     ) { padding ->
         Column(
@@ -213,15 +225,28 @@ fun VaultScreen(
             ui.statusMessage?.let {
                 Text(it, color = MaterialTheme.colorScheme.primary)
             }
-            Button(
-                onClick = {
-                    viewModel.clearMessages()
-                    showCreate = true
-                },
-                enabled = !ui.busy,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(stringResource(R.string.vault_add))
+                Button(
+                    onClick = {
+                        viewModel.clearMessages()
+                        showCreate = true
+                    },
+                    enabled = !ui.busy,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.vault_add))
+                }
+                if (!showTopBar && ui.entries.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = { viewModel.prepareMetaExport() },
+                        enabled = !ui.busy,
+                    ) {
+                        Text(stringResource(R.string.vault_export_meta))
+                    }
+                }
             }
 
             if (ui.entries.isEmpty()) {

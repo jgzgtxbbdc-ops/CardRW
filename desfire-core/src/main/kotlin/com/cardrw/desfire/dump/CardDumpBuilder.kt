@@ -34,6 +34,9 @@ object CardDumpBuilder {
         appVersion: String = "unknown",
         friendlyName: (String) -> String? = { null },
         createdAt: Instant = Instant.now(),
+        dumpMode: String = "quick",
+        profileName: String? = null,
+        coverageLines: List<String> = emptyList(),
     ): CardDumpDocument {
         val apps = identity.applications.map { aid ->
             val hex = aid.hex.uppercase()
@@ -62,7 +65,15 @@ object CardDumpBuilder {
         }
 
         val note = buildString {
-            append("Dump moniteur CardRW — uniquement ce qui était lisible avec les clés disponibles. ")
+            when (dumpMode) {
+                "complete" -> {
+                    append("Dump complet CardRW")
+                    if (profileName != null) append(" (profil « $profileName »)")
+                    append(" — auth multi-slots + ReadData. ")
+                }
+                else -> append("Dump rapide CardRW — structure + données déjà lues / free. ")
+            }
+            append("Uniquement ce qui était lisible avec les clés disponibles. ")
             append("Aucun secret (matériau de clé) n’est inclus. ")
             if (unread.isEmpty()) {
                 append("Tous les fichiers explorés ont un contenu ou un statut final.")
@@ -76,6 +87,8 @@ object CardDumpBuilder {
             appVersion = appVersion,
             integritySha256 = null,
             note = note,
+            dumpMode = dumpMode,
+            profileName = profileName,
             card = DumpCardSection(
                 typeLabel = identity.typeLabel,
                 uidTag = identity.uidFromTag?.let { Hex.encode(it) },
@@ -89,6 +102,7 @@ object CardDumpBuilder {
             structure = DumpStructureSection(
                 applications = allApps,
                 unreadFiles = unread,
+                coverage = coverageLines,
             ),
             data = DumpDataSection(files = dataFiles),
             secrets = DumpSecretsSection(keysIncluded = false),
@@ -104,6 +118,7 @@ object CardDumpBuilder {
 
     fun toHumanText(doc: CardDumpDocument): String = buildString {
         appendLine("CardRW dump v${doc.formatVersion}")
+        appendLine("mode: ${doc.dumpMode}${doc.profileName?.let { " · profil $it" } ?: ""}")
         appendLine("created: ${doc.createdAt}")
         appendLine("app: ${doc.appVersion}")
         appendLine("sha256: ${doc.integritySha256 ?: "—"}")

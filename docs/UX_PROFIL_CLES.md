@@ -1,6 +1,6 @@
 # UX profil de clés (key set)
 
-**Statut :** P0–**P3** livrés (CRUD + résolveur + capture session) — 2026-07-24  
+**Statut :** P0–**P5** livrés (CRUD + résolveur + capture + dump + restore profil) — 2026-09-09  
 **Portée :** relier **slots carte** et **matériaux coffre** pour dump / encode / moniteur multi-clés sans saisie manuelle à chaque intention  
 **Motivation :** une carte DESFire réelle n’a pas « une clé » — elle a un **jeu** (PICC master + maîtres app + R/W par fichier)  
 **Liens :** coffre [`UX_COFFRE_CLES.md`](UX_COFFRE_CLES.md) · moniteur [`UX_ECRAN_CARTE.md`](UX_ECRAN_CARTE.md) · CDC §6.2.1 / §7.3 / §8 · restore `DumpRestorePlanner`
@@ -297,8 +297,8 @@ Série : même profil + variables `{{uid}}` / `{{counter}}` — le profil ne cha
 | **P1** | Modèle `KeyProfile` + repo + écran liste/détail CRUD bindings | CRUD sans NFC | Coffre K1+ | ✅ |
 | **P2** | `KeyMaterialResolver` branché moniteur (select / CTA / write) | Auth multi-clés sans retaper si profil complet | P1, U4b | ✅ |
 | **P3** | Capture « Enregistrer ce jeu » depuis `rememberedKeysByAid` | 1 session → 1 profil | P1–P2 | ✅ |
-| **P4** | Dump **Complet avec profil** + dry-run couverture | Fichiers non usine lus si bindings OK | P2, CardDumpBuilder | ⬜ |
-| **P5** | Restore/encode : resolve W/RW + dry-run matériaux | Encode non-usine labo | P2, DumpRestorePlanner | ⬜ |
+| **P4** | Dump **Complet avec profil** + dry-run couverture | Fichiers non usine lus si bindings OK | P2, CardDumpBuilder | ✅ |
+| **P5** | Restore/encode : resolve W/RW + dry-run matériaux | Encode non-usine labo | P2, DumpRestorePlanner | ✅ |
 | **P6** | Chip profil actif moniteur + polish + export portable noms | UX atelier fluide | P1–P3 | ⬜ |
 | **P7** | Templates liés au profil | Série v1.1 | P5, templates | ⬜ |
 
@@ -414,6 +414,25 @@ desfire-core/   (inchangé pour le secret)
 | Moniteur | bouton « Enregistrer ce jeu (N slots) » + sheet |
 | Effet | crée coffre manquant (noms K4) + profil + active le profil |
 | Tests | `KeyProfileCaptureTest` |
+
+### P5 livré (code)
+
+| Élément | Emplacement |
+|---|---|
+| Dry-run matériaux | `RestoreMaterialPlanner` (PICC k0, app k0, W/RW) |
+| Auth restore | `resolveSlotMaterial` → `ensurePiccMasterAesSession` / `ensureAppSlotAesSession` |
+| UI | sheet restore : profil + ✓/⚠/✗ ; exécution bloquée si PICC/master manquant |
+| Tests | `RestoreMaterialPlannerTest` |
+
+### P4 livré (code)
+
+| Élément | Emplacement |
+|---|---|
+| Dry-run couverture | `DumpCoveragePlanner` (cache + profil, sans NFC) |
+| Dump complet | `CardViewModel.exportDump(COMPLETE)` — visite PICC + apps, **sans sheet** |
+| JSON | `dump_mode`, `profile_name`, `structure.coverage` + `unread_files` |
+| UI | Carte · ⋮ · Dumper la carte (rapide / complet) |
+| Tests | `DumpCoveragePlannerTest` |
 
 ---
 
